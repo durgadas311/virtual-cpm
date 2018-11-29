@@ -1608,6 +1608,9 @@ ee.printStackTrace();
 			}
 		}
 		msgbuf[start] = (byte)0;
+		// TODO: need this? NDOS copies back FCB+RR
+		// but if nothing changed...
+		//fcb.putIO(msgbuf, fcbadr, true);
 		return 37;
 	}
 
@@ -1682,7 +1685,7 @@ ee.printStackTrace();
 			msgbuf[start] = (byte)255; // a.k.a. File Not Found
 			return 1;
 		} else {
-			fcb.putNew(msgbuf, fcbadr, true);
+			fcb.putNew(msgbuf, fcbadr, false);
 			return 37;
 		}
 	}
@@ -1992,7 +1995,7 @@ ee.printStackTrace();
 			msgbuf[start] = (byte)255;
 			return 1;
 		}
-		fcb.putNew(msgbuf, fcbadr, true);
+		fcb.putNew(msgbuf, fcbadr, false);
 		return 37;
 	}
 
@@ -2055,7 +2058,7 @@ ee.printStackTrace();
 		}
 		Arrays.fill(msgbuf, dmaadr + rc, dmaadr + 128, (byte)0x1a);
 		// detect media change?
-		fcb.putIO(msgbuf, fcbadr, false);
+		fcb.putIO(msgbuf, fcbadr, true);
 		return 37 + 128;
 	}
 
@@ -2093,7 +2096,7 @@ ee.printStackTrace();
 			return 1;
 		}
 		// detect media change?
-		fcb.putIO(msgbuf, fcbadr, false);
+		fcb.putIO(msgbuf, fcbadr, true);
 		return 37;
 	}
 

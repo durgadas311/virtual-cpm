@@ -59,6 +59,7 @@ public class VirtualCpm implements Computer, Runnable {
 	};
 
 	private Z80 cpu;
+	private Z80Disassembler disas;
 	private long clock;
 	private byte[] mem;
 	private boolean running;
@@ -71,7 +72,6 @@ public class VirtualCpm implements Computer, Runnable {
 	private int dma;
 	private int drv;
 	private int usr;
-	private byte[] msg;
 
 	static final int wbootv = 0x0000;
 	static final int bdosv = 0x0005;
@@ -116,8 +116,8 @@ public class VirtualCpm implements Computer, Runnable {
 		cmds = new Vector<String[]>();
 		cpu = new Z80(this);
 		mem = new byte[65536];
-		msg = new byte[261 + NetworkServer.mhdrlen];
-		// HostFileBdos.initCfg(tmp, sid, max, dir);
+		disas = new Z80DisassemblerMAC80(mem);
+		HostFileBdos.initCfg('P', (byte)0x00, 1, null);
 		HostFileBdos.initLsts(props, "vcpm");
 		hfb = new HostFileBdos(props, "vcpm", new Vector<String>(), 0xfe);
 		cmds.add(argv);
@@ -162,7 +162,7 @@ public class VirtualCpm implements Computer, Runnable {
 	/// Computer interface implementation ///
 
 	public int peek8(int address) {
-		int val = mem[address & 0xffff];
+		int val = mem[address & 0xffff] & 0xff;
 		return val;
 	}
 	public void poke8(int address, int value) {
@@ -222,6 +222,7 @@ public class VirtualCpm implements Computer, Runnable {
 
 	private void warmBoot() {
 		// we're done? or support SUBMIT? (requires a CCP)
+		System.out.format("\n");
 		running = false;
 	}
 
@@ -235,8 +236,8 @@ public class VirtualCpm implements Computer, Runnable {
 	private int doPOP() {
 		int val;
 		int sp = cpu.getRegSP();
-		val = (peek8(sp++) & 0xff) << 8;
-		val |= (peek8(sp++) & 0xff);
+		val = (peek8(sp++) & 0xff);
+		val |= ((peek8(sp++) & 0xff) << 8);
 		cpu.setRegSP(sp);
 		return val;
 	}
@@ -248,19 +249,25 @@ public class VirtualCpm implements Computer, Runnable {
 
 	// Derived from HostFileBdos.copyOutDir()
 	private void setupFCB(byte[] buf, int start, String arg) {
-		int x = start;
+		int x = 0;
 		int t = 0;
-		Arrays.fill(buf, start, 16, (byte)0);
 		if (arg.matches("[a-p]:.*")) {
-			buf[x] = (byte)(arg.charAt(0) - 'a' + 1);
+			buf[start + x] = (byte)(arg.charAt(t) - 'a' + 1);
 			t += 2;
 		}
 		++x;
-		while (t < arg.length() && arg.charAt(t) != '.' && x < 8) {
-			buf[x++] = (byte)Character.toUpperCase(arg.charAt(t++));
+		char b = ' ';
+		char c;
+		while (t < arg.length() && arg.charAt(t) != '.' && x < 9) {
+			c = arg.charAt(t++);
+			if (c == '*') {
+				b = '?';
+				break;
+			}
+			buf[start + x++] = (byte)Character.toUpperCase(c);
 		}
-		while (x < 8) {
-			buf[x++] = ' ';
+		while (x < 9) {
+			buf[start + x++] = (byte)b;
 		}
 		while (t < arg.length() && arg.charAt(t) != '.') {
 			++t;
@@ -268,20 +275,31 @@ public class VirtualCpm implements Computer, Runnable {
 		if (t < arg.length() && arg.charAt(t) == '.') {
 			++t;
 		}
-		while (t < arg.length() && arg.charAt(t) != '.' && x < 11) {
-			buf[x++] = (byte)Character.toUpperCase(arg.charAt(t++));
+		b = ' ';
+		while (t < arg.length() && x < 12) {
+			c = arg.charAt(t++);
+			if (c == '*') {
+				b = '?';
+				break;
+			}
+			buf[start + x++] = (byte)Character.toUpperCase(c);
 		}
-		while (x < 11) {
-			buf[x++] = ' ';
+		while (x < 12) {
+			buf[start + x++] = (byte)b;
 		}
 	}
 
 	private void setPage0(String[] argv) {
+		Arrays.fill(mem, 0x0040, 0x0100, (byte)0);
 		if (argv.length > 1) {
 			setupFCB(mem, fcb1, argv[1].toLowerCase());
-			if (argv.length > 2) {
-				setupFCB(mem, fcb2, argv[2].toLowerCase());
-			}
+		} else {
+			Arrays.fill(mem, fcb1 + 1, fcb1 + 12, (byte)' ');
+		}
+		if (argv.length > 2) {
+			setupFCB(mem, fcb2, argv[2].toLowerCase());
+		} else {
+			Arrays.fill(mem, fcb2 + 1, fcb2 + 12, (byte)' ');
 		}
 		String s = "";
 		for (int x = 1; x < argv.length; ++x) {
@@ -292,7 +310,15 @@ public class VirtualCpm implements Computer, Runnable {
 			s = s.substring(0, 127);
 		}
 		mem[defdma] = (byte)s.length();
-		System.arraycopy(s.getBytes(), 0, mem, defdma + 1, s.length());
+		if (s.length() > 0) {
+			System.arraycopy(s.getBytes(), 0, mem, defdma + 1, s.length());
+		}
+	}
+
+	private void logDrv(int d) {
+		drv = d;
+		mem[alvbf] = (byte)drv;
+		hfb.bdosCall(14, mem, alvbf, 1, fcb1, dma);
 	}
 
 	private File search(int dr, int ur, String cmd) {
@@ -303,14 +329,17 @@ public class VirtualCpm implements Computer, Runnable {
 		}
 		File path = new File(hfb.cpmPath(d, ur, cmd));
 		if (dot || path.exists()) {
+			logDrv(d);
 			return path;
 		}
 		path = new File(hfb.cpmPath(d, ur, cmd + ".com"));
 		if (path.exists()) {
+			logDrv(d);
 			return path;
 		}
 		path = new File(hfb.cpmPath(d, ur, cmd + ".sub"));
 		if (path.exists()) {
+			logDrv(d);
 			return path;
 		}
 		if (ur != 0) {
@@ -344,7 +373,7 @@ public class VirtualCpm implements Computer, Runnable {
 			br.close();
 			return true;
 		} catch (Exception ee) {
-			System.out.format(ee.getMessage());
+			System.out.println(ee.getMessage());
 			return false;
 		}
 	}
@@ -356,7 +385,7 @@ public class VirtualCpm implements Computer, Runnable {
 			in.close();
 			return true;
 		} catch (Exception ee) {
-			System.out.format(ee.getMessage());
+			System.out.println(ee.getMessage());
 			return false;
 		}
 	}
@@ -533,6 +562,14 @@ public class VirtualCpm implements Computer, Runnable {
 		} else if (rsp == 2) {
 			hl = (mem[param] & 0xff) |
 				((mem[param + 1] & 0xff) << 8);
+		} else if (fnc == 17 || fnc == 18) {	// SEARCH
+			hl = (mem[param] & 0xff);
+			if (rsp >= 128) {
+				System.arraycopy(mem, param + 1, mem, dma, 128);
+			} else {	// must be 32...
+				int ix = (hl << 5);
+				System.arraycopy(mem, param + 1, mem, dma + ix, 32);
+			}
 		} else if (fnc == 27) {	// get ALV
 			hl = alvbf;
 		} else if (fnc == 46) {
@@ -541,6 +578,12 @@ public class VirtualCpm implements Computer, Runnable {
 			mem[dma + 2] = mem[param + 2];
 		}
 		return hl;
+	}
+
+	private void bdosRESET() {
+		dma = defdma;
+		drv = 0;
+		// more?
 	}
 
 	private void bdosTrap(int pc) {
@@ -562,9 +605,9 @@ public class VirtualCpm implements Computer, Runnable {
 			// TODO: what version to report?
 			hl = 0x0022;
 		} else if (fnc == 13) {	// reset BDOS
-			dma = defdma;
-			drv = 0;
-			// more?
+			bdosRESET();
+		} else if (fnc == 25) {	// get cur drv
+			hl = drv;
 		} else if (fnc == 26) {	// set DMA
 			dma = de;
 		} else if (fnc == 32) {	// set/get USER
@@ -580,8 +623,37 @@ public class VirtualCpm implements Computer, Runnable {
 		}
 		cpu.setRegHL(hl);
 		cpu.setRegA(cpu.getRegL());
-		cpu.setRegB(cpu.getRegH());	// yes?
+		cpu.setRegB(cpu.getRegH());
 		doRET();
+	}
+
+	private void cpuDump() {
+		cpuDump(cpu.getRegPC());
+	}
+
+	private void cpuDump(int pc) {
+		System.err.format("%04x: %02x %02x %02x %02x : " +
+				"%02x %04x %04x %04x [%04x] %s\n",
+			pc,
+			mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3],
+			cpu.getRegA(),
+			cpu.getRegBC(),
+			cpu.getRegDE(),
+			cpu.getRegHL(),
+			cpu.getRegSP(),
+			disas.disas(pc)
+			);
+	}
+
+	private void coreDump() {
+		try {
+			FileOutputStream f = new FileOutputStream("vcpm.core");
+			f.write(mem);
+			f.close();
+			System.err.format("CP/M core dumped\n");
+		} catch (Exception ee) {
+			ee.printStackTrace();
+		}
 	}
 
 	private void osTrap(int pc) {
@@ -596,6 +668,8 @@ public class VirtualCpm implements Computer, Runnable {
 	public void run() {
 		int clk = 0;
 		while (cmds.size() > 0) {
+			coldBoot(); // always do this?
+			bdosRESET();
 			running = true;
 			String[] cmd = cmds.remove(0);
 			doCCP(cmd); // parse command... setup execution...
@@ -608,8 +682,10 @@ public class VirtualCpm implements Computer, Runnable {
 					}
 				}
 				clk = cpu.execute();
+//cpuDump(PC);
 			}
 		}
+//coreDump();
 		stopped = true;
 		stopWait.release();
 	}
