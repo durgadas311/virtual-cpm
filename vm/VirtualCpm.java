@@ -123,6 +123,9 @@ public class VirtualCpm implements Computer, Runnable {
 		HostFileBdos.initLsts(props, "vcpm");
 		hfb = new HostFileBdos(props, "vcpm", new Vector<String>(), 0xfe);
 		cmds.add(argv);
+		drv = 0;
+		usr = 0;
+		dma = defdma;
 	}
 
 	public void reset() {
@@ -250,7 +253,8 @@ public class VirtualCpm implements Computer, Runnable {
 	}
 
 	// Derived from HostFileBdos.copyOutDir()
-	private void setupFCB(byte[] buf, int start, String arg) {
+	private boolean setupFCB(byte[] buf, int start, String arg) {
+		boolean afn = false;
 		int x = 0;
 		int t = 0;
 		if (arg.matches("[a-p]:.*")) {
@@ -263,9 +267,11 @@ public class VirtualCpm implements Computer, Runnable {
 		while (t < arg.length() && arg.charAt(t) != '.' && x < 9) {
 			c = arg.charAt(t++);
 			if (c == '*') {
+				afn = true;
 				b = '?';
 				break;
 			}
+			if (c == '?') afn = true;
 			buf[start + x++] = (byte)Character.toUpperCase(c);
 		}
 		while (x < 9) {
@@ -281,14 +287,17 @@ public class VirtualCpm implements Computer, Runnable {
 		while (t < arg.length() && x < 12) {
 			c = arg.charAt(t++);
 			if (c == '*') {
+				afn = true;
 				b = '?';
 				break;
 			}
+			if (c == '?') afn = true;
 			buf[start + x++] = (byte)Character.toUpperCase(c);
 		}
 		while (x < 12) {
 			buf[start + x++] = (byte)b;
 		}
+		return afn;
 	}
 
 	private void setPage0(String[] argv) {
@@ -318,7 +327,14 @@ public class VirtualCpm implements Computer, Runnable {
 	}
 
 	private void logDrv(int d) {
-		drv = d;
+		int v = (1 << (d & 0x0f));
+		mem[alvbf] = (byte)v;
+		mem[alvbf + 1] = (byte)(v >> 8);
+		hfb.bdosCall(38, mem, alvbf, 2, fcb1, dma);
+	}
+
+	private void setDrv(int d) {
+		drv = d & 0x0f;
 		mem[alvbf] = (byte)drv;
 		hfb.bdosCall(14, mem, alvbf, 1, fcb1, dma);
 	}
@@ -329,47 +345,64 @@ public class VirtualCpm implements Computer, Runnable {
 		if (d < 0) {
 			d = drv;
 		}
-		File path = new File(hfb.cpmPath(d, ur, cmd));
-		if (dot || path.exists()) {
-			logDrv(d);
-			return path;
-		}
-		path = new File(hfb.cpmPath(d, ur, cmd + ".com"));
-		if (path.exists()) {
-			logDrv(d);
-			return path;
-		}
-		path = new File(hfb.cpmPath(d, ur, cmd + ".sub"));
-		if (path.exists()) {
-			logDrv(d);
-			return path;
+		File path;
+		if (dot) {
+			path = new File(hfb.cpmPath(d, ur, cmd));
+			if (path.exists()) {
+				logDrv(d);
+				return path;
+			}
+		} else {
+			path = new File(hfb.cpmPath(d, ur, cmd + ".com"));
+			if (path.exists()) {
+				logDrv(d);
+				return path;
+			}
+			path = new File(hfb.cpmPath(d, ur, cmd + ".sub"));
+			if (path.exists()) {
+				logDrv(d);
+				return path;
+			}
 		}
 		if (ur != 0) {
 			return search(dr, 0, cmd);
 		}
 		if (dr < 0) {
-			return search(0, 0, cmd);
+			return search(0, ur, cmd);
 		}
 		return path; // will fail...
 	}
 
 	private boolean loadSUB(File path, String[] argv) {
-		// TODO: or:
-		// cmds.clear(); // ???
+		// TODO: or: cmds.clear(); // ???
 		try {
 			String s;
 			FileInputStream sub = new FileInputStream(path);
 			BufferedReader br = new BufferedReader(new InputStreamReader(sub));
 			while ((s = br.readLine()) != null)   {
+				s = s.trim();
+				// TODO: allow continuation?
+				if (s.length() == 0) {
+					continue;
+				}
+				// TODO: allow comments at mid-line?
 				if (s.startsWith("#") || s.startsWith(";")) {
 					continue;
 				}
-				for (int x = 1; x < argv.length; ++x) {
+				if (s.startsWith("<")) {
+					// TODO: how to handle input lines?
+					continue;
+				}
+				for (int x = 1; x < 10; ++x) {
 					String var = String.format("$%d", x);
-					s = s.replace(var, argv[x]);
+					if (x < argv.length) {
+						s = s.replace(var, argv[x]);
+					} else {
+						s = s.replace(var, "");
+					}
 				}
 				cmds.add(s.split("\\s"));
-				// TODO: or:
+				// TODO: or insert in-place:
 				// cmds.add(?, s.split("\\s"));
 			}
 			br.close();
@@ -392,23 +425,265 @@ public class VirtualCpm implements Computer, Runnable {
 		}
 	}
 
+	private void doERA(String[] argv) {
+		// TODO: use hfb.cpmPath() instead?
+		if (setupFCB(mem, fcb1, argv[1].toLowerCase())) {
+			// && mem[fcb1 + 1] == '?' && mem[fcb1 + 9] == '?') {
+			// TODO: prompt "ALL (Y/N)?"
+System.out.println("ERA " + argv[1] + " (Y/N)?");
+		}
+		mem[alvbf] = (byte)usr;
+		int rsp = hfb.bdosCall(19, mem, alvbf, 1, fcb1, dma);
+		int ent = mem[alvbf] & 0xff;
+		if (ent > 3) { // assume FF
+			// TODO: specific failure?
+			System.out.println("Not erased");
+		}
+	}
+
+	// Get string from FCB (dir entry) name fields.
+	private String getFileName(byte[] buf, int start) {
+		String n = "";
+		int x = 0;
+		for (; x < 8; ++x) {
+			char c = (char)(buf[start + x] & 0x7f);
+			if (c == ' ') {
+				x = 8;
+				break;
+			}
+			n += c;
+		}
+		for (; x < 11; ++x) {
+			char c = (char)(buf[start + x] & 0x7f);
+			if (c == ' ') break;
+			if (x == 8) {
+				n += '.';
+			}
+			n += c;
+		}
+		return n;
+	}
+
+	private String getFileDrive(String fn) {
+		int d = drv;
+		if (fn.matches("[a-p]:.*")) {
+			d = fn.charAt(0) - 'a';
+			fn = fn.substring(2);
+		}
+		return hfb.cpmPath(d, usr, fn);
+	}
+
+	private void doREN(String[] argv) {
+		if (argv.length < 2 || argv.length > 3) {
+			System.out.println("REN syntax error");
+			return;
+		}
+		int eq = argv[1].indexOf('=');
+		File fn;
+		File fo;
+		if (eq > 0) {
+			if (argv.length > 2) {
+				System.out.println("REN syntax error");
+				return;
+			}
+			String[] f = argv[1].split("=");
+			fn = new File(getFileDrive(f[0]));
+			fo = new File(getFileDrive(f[1]));
+		} else {
+			fn = new File(getFileDrive(argv[1]));
+			fo = new File(getFileDrive(argv[2]));
+		}
+		// TODO: need to check for same drive?
+		fo = new File(fn.getParent() + "/" + fo.getName());
+		if (fn.exists()) {
+			System.out.println("File exists");
+			return;
+		}
+		if (!fo.exists()) {
+			System.out.println("No file");
+			return;
+		}
+		try {
+			fo.renameTo(fn);
+		} catch (Exception ee) {
+			System.out.println(ee.getMessage());
+		}
+	}
+
+	private void doDIR(String[] argv) {
+		if (argv.length > 2) {
+			System.out.println("DIR syntax error");
+			return;
+		}
+		if (argv.length == 1) {
+			setupFCB(mem, fcb1, "*.*");
+		} else if (argv[1].matches(".:")) {
+			setupFCB(mem, fcb1, argv[1] + "*.*");
+		} else {
+			setupFCB(mem, fcb1, argv[1]);
+		}
+		String d = "";
+		if (mem[fcb1] != 0) {
+			d += (char)((mem[fcb1] & 0xff) - 1 + 'A');
+		} else {
+			d += (char)(drv + 'A');
+		}
+		d += ':';
+		d += ' ';
+		int fnc = 17;
+		int cnt = 0;
+		int col = 0;
+		do {
+			mem[alvbf] = (byte)drv;
+			mem[alvbf + 1] = (byte)usr;
+			int rsp = hfb.bdosCall(fnc, mem, alvbf, 2, fcb1, dma);
+			int ent = mem[alvbf] & 0xff;
+			if (ent > 3) { // assume FF
+				break;
+			}
+			fnc = 18;
+			// TODO: allow selecting SYS...
+			if ((mem[alvbf + 11] & 0x80) != 0) { // SYS
+				continue;
+			}
+			++cnt;
+			if (col == 0) {
+				System.out.format(d);
+			}
+			System.out.format("%-15s", getFileName(mem, alvbf + 2));
+			++col;
+			if (col >= 5) {
+				System.out.format("\n");
+				col = 0;
+			}
+		} while (true);
+		if (col != 0) {
+			System.out.format("\n");
+		}
+		if (cnt == 0) {
+			System.out.println("No file");
+		}
+	}
+
+	private void doTYPE(String[] argv) {
+		if (argv.length != 2) {
+			System.out.println("TYPE syntax error");
+			return;
+		}
+		File f = new File(getFileDrive(argv[1]));
+		if (!f.exists()) {
+			System.out.println("No file" + f.getAbsolutePath());
+			return;
+		}
+		try {
+			String s;
+			FileInputStream tf = new FileInputStream(f);
+			BufferedReader br = new BufferedReader(new InputStreamReader(tf));
+			while ((s = br.readLine()) != null)   {
+				System.out.println(s);
+			}
+		} catch (Exception ee) {
+			System.out.println(ee.getMessage());
+		}
+	}
+
+	private void doSAVE(String[] argv) {
+		if (argv.length != 3) {
+			System.out.println("SAVE syntax error");
+			return;
+		}
+		int npg = 0;
+		File f = new File(getFileDrive(argv[2]));
+		try {
+			npg = Integer.valueOf(argv[1]);
+			if (npg <= 0 || npg > 254) {
+				return;
+			}
+			FileOutputStream fo = new FileOutputStream(f);
+			fo.write(mem, tpa, npg * 256);
+		} catch (Exception ee) {
+			System.out.println(ee.getMessage());
+			return;
+		}
+	}
+
+	private boolean ccpBuiltin(String cmd, String[] argv) {
+		if (cmd.equals("era")) {
+			doERA(argv);
+		} else if (cmd.equals("ren")) {
+			doREN(argv);
+		} else if (cmd.equals("dir")) {
+			doDIR(argv);
+		} else if (cmd.equals("type")) {
+			doTYPE(argv);
+		} else if (cmd.equals("save")) {
+			doSAVE(argv);
+		} else {
+			return false;
+		}
+		return true;
+	}
+
 	private void doCCP(String[] argv) {
-		String cmd = argv[0];
+		String cmd = "";
+		cmd += (char)(drv + 'A');
+		if (usr > 0) {
+			cmd += String.format("%d", usr);
+		}
+		cmd += '>';
+		cmd += argv[0];
 		for (int x = 1; x < argv.length; ++x) {
 			cmd += ' ';
 			cmd += argv[x];
 		}
-		System.out.format("%c>%s\n", (char)(drv + 'A'), cmd);
+		System.out.format("%s\n", cmd);
 		cmd = argv[0].toLowerCase();
-		// TODO: support user number designation...
-		if (cmd.matches("[a-p]:")) {
-			drv = cmd.charAt(0) - 'a';
+		if (cmd.matches("[0-9a-p]+:")) {
+			int ix = 0;
+			int u = 0;
+			int d = 0;
+			boolean gotu = false;
+			boolean gotd = false;
+			boolean err = false;
+			if (Character.isDigit(cmd.charAt(ix))) {
+				while (Character.isDigit(cmd.charAt(ix))) {
+					u = (u * 10) + cmd.charAt(ix++) - '0';
+				}
+				gotu = true;
+				err = (u > 31);	// TODO: limit 15?
+			}
+			if (!err && Character.isLetter(cmd.charAt(ix))) {
+				d = cmd.charAt(ix++) - 'a';
+				gotd = true;
+				err = (d > 15);
+			}
+			if (!err && !gotu && Character.isDigit(cmd.charAt(ix))) {
+				while (Character.isDigit(cmd.charAt(ix))) {
+					u = (u * 10) + cmd.charAt(ix++) - '0';
+				}
+				gotu = true;
+				err = (u > 31);	// TODO: limit 15?
+			}
+			if (!err) {
+				err = (cmd.charAt(ix) != ':');
+			}
+			if (err) {
+				System.err.format("Syntax error: \"%s\"\n", cmd);
+				// TODO: abort everything?
+			} else {
+				if (gotd) setDrv(d);
+				if (gotu) usr = u;
+			}
 			running = false;
 			return;
 		}
-		// TODO: pre-init default drive... user?
+		if (ccpBuiltin(cmd, argv)) {
+			running = false; // skip to next command
+			return;
+		}
 		int d = -1;
 		int u = 0;
+		// TODO: can prefix include user number?
 		if (cmd.matches("[a-p]:.*")) {
 			d = cmd.charAt(0) - 'a';
 			cmd = cmd.substring(2);
@@ -418,7 +693,7 @@ public class VirtualCpm implements Computer, Runnable {
 		if (path.getName().endsWith(".sub")) {
 			ok = loadSUB(path, argv);
 			// nothing to run, yet...
-			running = false;
+			running = false; // skip to next command
 			return;
 		} else {
 			ok = loadCOM(path);
@@ -547,6 +822,7 @@ public class VirtualCpm implements Computer, Runnable {
 			mem[param + 1] = (byte)de;
 			++len;	// the only case where 'len' matters
 		} else if (fnc == 14) {	// select drive
+			// same as setDrv()...
 			drv = de & 0x0f;
 			mem[param] = (byte)drv;
 		} else {
@@ -595,7 +871,7 @@ public class VirtualCpm implements Computer, Runnable {
 
 	private void bdosRESET() {
 		dma = defdma;
-		drv = 0;
+		//drv = 0; // No?
 		// more?
 	}
 
@@ -676,6 +952,10 @@ public class VirtualCpm implements Computer, Runnable {
 		}
 	}
 
+	private void coldStart() {
+		setDrv(0);
+	}
+
 	private void warmStart() {
 		// TODO: 2.2 vs 3.1
 		if ((ver & 0xff) == 0x31) {
@@ -692,6 +972,7 @@ public class VirtualCpm implements Computer, Runnable {
 	//////// Runnable /////////
 	public void run() {
 		int clk = 0;
+		coldStart();
 		while (cmds.size() > 0) {
 			warmStart();
 			running = true;
