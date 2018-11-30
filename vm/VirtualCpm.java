@@ -72,6 +72,8 @@ public class VirtualCpm implements Computer, Runnable {
 	private int dma;
 	private int drv;
 	private int usr;
+	// TODO: what version to report?
+	private int ver = 0x0022;
 
 	static final int wbootv = 0x0000;
 	static final int bdosv = 0x0005;
@@ -391,7 +393,13 @@ public class VirtualCpm implements Computer, Runnable {
 	}
 
 	private void doCCP(String[] argv) {
-		String cmd = argv[0].toLowerCase();
+		String cmd = argv[0];
+		for (int x = 1; x < argv.length; ++x) {
+			cmd += ' ';
+			cmd += argv[x];
+		}
+		System.out.format("%c>%s\n", (char)(drv + 'A'), cmd);
+		cmd = argv[0].toLowerCase();
 		// TODO: support user number designation...
 		if (cmd.matches("[a-p]:")) {
 			drv = cmd.charAt(0) - 'a';
@@ -409,6 +417,9 @@ public class VirtualCpm implements Computer, Runnable {
 		boolean ok = false;
 		if (path.getName().endsWith(".sub")) {
 			ok = loadSUB(path, argv);
+			// nothing to run, yet...
+			running = false;
+			return;
 		} else {
 			ok = loadCOM(path);
 		}
@@ -510,6 +521,8 @@ public class VirtualCpm implements Computer, Runnable {
 			break;
 		case 10: // conlin
 			break;
+		case 11: // const
+			break;
 		case 3:	// auxin
 		case 4:	// auxout
 		case 7:	// auxist
@@ -602,8 +615,7 @@ public class VirtualCpm implements Computer, Runnable {
 		if (fnc < 12 && fnc != 5) {
 			hl = bdosChar(fnc);
 		} else if (fnc == 12) {	// get version
-			// TODO: what version to report?
-			hl = 0x0022;
+			hl = ver;
 		} else if (fnc == 13) {	// reset BDOS
 			bdosRESET();
 		} else if (fnc == 25) {	// get cur drv
@@ -664,12 +676,24 @@ public class VirtualCpm implements Computer, Runnable {
 		}
 	}
 
+	private void warmStart() {
+		// TODO: 2.2 vs 3.1
+		if ((ver & 0xff) == 0x31) {
+			hfb.bdosCall(98, mem, alvbf, 1, fcb1, dma);
+		} else {
+			mem[alvbf] = (byte)0xff;
+			mem[alvbf + 1] = (byte)0xff;
+			hfb.bdosCall(39, mem, alvbf, 2, fcb1, dma);
+		}
+		coldBoot(); // always do this?
+		bdosRESET();
+	}
+
 	//////// Runnable /////////
 	public void run() {
 		int clk = 0;
 		while (cmds.size() > 0) {
-			coldBoot(); // always do this?
-			bdosRESET();
+			warmStart();
 			running = true;
 			String[] cmd = cmds.remove(0);
 			doCCP(cmd); // parse command... setup execution...
