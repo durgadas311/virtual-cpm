@@ -1894,6 +1894,7 @@ ee.printStackTrace();
 			if ((fcb.ext == 0 && fcb.cr == 0) ||
 					fcb.cr != fcb.s1) {
 				long ln = fcb.cr;
+				ln += fcb.ext * 128;
 				ln *= 128;
 				of.fd.seek(ln);
 			}
@@ -1947,6 +1948,7 @@ ee.printStackTrace();
 			if ((fcb.ext == 0 && fcb.cr == 0) ||
 					fcb.cr != fcb.s1) {
 				long ln = fcb.cr;
+				ln += fcb.ext * 128;
 				ln *= 128;
 				of.fd.seek(ln);
 			}
