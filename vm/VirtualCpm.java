@@ -16,43 +16,44 @@ public class VirtualCpm implements Computer, Runnable {
 	static final int passE = 0x01;
 	static final int passDE = 0x02;
 	static final int passUSR = 0x04;
-	static final int passDRV = 0x04;
+	static final int passDRV = 0x08;
+	static final int useMSC = 0x10;
 
 	private byte[] flags = {
-		(byte)passUSR,	// 15 - OPEN
-		(byte)passUSR,	// 16 - CLOSE
-		(byte)passDRV,	// 17 - SEARCH FIRST
-		(byte)0,	// 18 - SEARCH NEXT
-		(byte)passUSR,	// 19 - DELETE
-		(byte)passUSR,	// 20 - READ SEQ
-		(byte)passUSR,	// 21 - WRITE SEQ
-		(byte)passUSR,	// 22 - MAKE
-		(byte)passUSR,	// 23 - RENAME
-		(byte)0,	// 24 - GET LOGIN VEC
-		(byte)0,	// 25 - N/A
-		(byte)0,	// 26 - N/A
-		(byte)passDRV,	// 27 - GET ALLOC VEC
-		(byte)passDRV,	// 28 - SET R/O
-		(byte)0,	// 29 - GET R/O VEC
-		(byte)passUSR,	// 30 - SET ATTR
-		(byte)passDRV,	// 31 - GET DPB
-		(byte)0,	// 32 - N/A
-		(byte)passUSR,	// 33 - READ RND
-		(byte)passUSR,	// 34 - WRITE RND
-		(byte)passUSR,	// 35 - COMP SIZE
-		(byte)passUSR,	// 36 - SET RND REC
-		(byte)passDE,	// 37 - RESET DRIVES
-		(byte)passDE,	// 38 - ACCESS DRIVES
-		(byte)passDE,	// 39 - FREE DRIVES
-		(byte)passUSR,	// 40 - WRITE RND ZF
-		(byte)0,	// 41 - N/A
-		(byte)passUSR,	// 42 - LOCK REC
-		(byte)passUSR,	// 43 - UNLOCK REC
-		(byte)0,	// 44 - N/A
-		(byte)0,	// 45 - N/A
-		(byte)passE,	// 46 - GET FREE SPACE
-		(byte)0,	// 47 - N/A
-		(byte)passE,	// 48 - FLUSH BUFFERS
+		(byte)passUSR,		// 15 - OPEN
+		(byte)passUSR,		// 16 - CLOSE
+		(byte)passDRV,		// 17 - SEARCH FIRST
+		(byte)0,		// 18 - SEARCH NEXT
+		(byte)passUSR,		// 19 - DELETE
+		(byte)(passUSR|useMSC),	// 20 - READ SEQ
+		(byte)(passUSR|useMSC),	// 21 - WRITE SEQ
+		(byte)passUSR,		// 22 - MAKE
+		(byte)passUSR,		// 23 - RENAME
+		(byte)0,		// 24 - GET LOGIN VEC
+		(byte)0,		// 25 - N/A
+		(byte)0,		// 26 - N/A
+		(byte)passDRV,		// 27 - GET ALLOC VEC
+		(byte)passDRV,		// 28 - SET R/O
+		(byte)0,		// 29 - GET R/O VEC
+		(byte)passUSR,		// 30 - SET ATTR
+		(byte)passDRV,		// 31 - GET DPB
+		(byte)0,		// 32 - N/A
+		(byte)(passUSR|useMSC),	// 33 - READ RND
+		(byte)(passUSR|useMSC),	// 34 - WRITE RND
+		(byte)passUSR,		// 35 - COMP SIZE
+		(byte)passUSR,		// 36 - SET RND REC
+		(byte)passDE,		// 37 - RESET DRIVES
+		(byte)passDE,		// 38 - ACCESS DRIVES
+		(byte)passDE,		// 39 - FREE DRIVES
+		(byte)(passUSR|useMSC),	// 40 - WRITE RND ZF
+		(byte)0,		// 41 - N/A
+		(byte)passUSR,		// 42 - LOCK REC
+		(byte)passUSR,		// 43 - UNLOCK REC
+		(byte)0,		// 44 - N/A
+		(byte)0,		// 45 - N/A
+		(byte)passE,		// 46 - GET FREE SPACE
+		(byte)0,		// 47 - N/A
+		(byte)passE,		// 48 - FLUSH BUFFERS
 	};
 	private byte[] flag3 = {
 		0 // TODO: CP/M 3 functions...
@@ -72,8 +73,10 @@ public class VirtualCpm implements Computer, Runnable {
 	private int dma;
 	private int drv;
 	private int usr;
+	private int msc;
+	private int erm;
 	// TODO: what version to report?
-	private int ver = 0x0022;
+	private int ver = 0x0031; //0x0022;
 
 	static final int wbootv = 0x0000;
 	static final int bdosv = 0x0005;
@@ -125,6 +128,8 @@ public class VirtualCpm implements Computer, Runnable {
 		cmds.add(argv);
 		drv = 0;
 		usr = 0;
+		msc = 1;
+		erm = 0;
 		dma = defdma;
 	}
 
@@ -315,7 +320,7 @@ public class VirtualCpm implements Computer, Runnable {
 		String s = "";
 		for (int x = 1; x < argv.length; ++x) {
 			s += ' ';
-			s += argv[x];
+			s += argv[x].toUpperCase();
 		}
 		if (s.length() > 127) {
 			s = s.substring(0, 127);
@@ -809,6 +814,50 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 		return hl;
 	}
 
+	private int getRR(byte[] mem, int fcb) {
+		int rr = ((mem[fcb + 35] & 0xff) << 16) |
+			((mem[fcb + 34] & 0xff) << 8) |
+			(mem[fcb + 33] & 0xff);
+		return rr;
+	}
+
+	private void putRR(byte[] mem, int fcb, int rr) {
+		mem[fcb + 35] = (byte)(rr >> 16);
+		mem[fcb + 34] = (byte)(rr >> 8);
+		mem[fcb + 33] = (byte)rr;
+	}
+
+	private int mscCall(int fnc, byte[] mem, int param, int len, int fcb, int dma) {
+		int cnt = msc;
+		int rsp = 0;
+		int rr = getRR(mem, fcb);
+		while (cnt > 0) {
+			// all these pass USER
+			mem[param] = (byte)usr;
+			rsp = hfb.bdosCall(fnc, mem, param, len, fcb, dma);
+			if (mem[param] != 0) {
+				cnt = msc - cnt;
+				break;
+			}
+			--cnt;
+			dma += 128;
+			if (fnc >= 33) {
+				putRR(mem, fcb, getRR(mem, fcb) + 1);
+			}
+		}
+		if (fnc >= 33) {
+			rsp = mem[param];
+			putRR(mem, fcb, rr);
+			// TODO: reset file pointer! need to point dma to unused space!
+			mem[param] = (byte)usr;
+			hfb.bdosCall(33, mem, param, len, fcb, 0xff80);
+			mem[param] = (byte)rsp;
+		}
+		// put 'cnt' into H...
+		mem[param + 1] = (byte)cnt;
+		return 2;
+	}
+
 	// Only called for fnc: 5, 14..25, 27..31, 33..
 	private int bdosDisk(int fnc) {
 		int de = cpu.getRegDE();	// fcb or param...
@@ -843,7 +892,12 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 		} else if ((flg & passDRV) != 0) {
 			mem[param] = (byte)drv;
 		}
-		int rsp = hfb.bdosCall(fnc, mem, param, len, de, dma);
+		int rsp;
+		if ((flg & useMSC) != 0) {
+			rsp = mscCall(fnc, mem, param, len, de, dma);
+		} else {
+			rsp = hfb.bdosCall(fnc, mem, param, len, de, dma);
+		}
 		if (rsp <= 0) { // ???
 			hl = 0xffff;
 		} else if (rsp == 1) {
@@ -871,6 +925,8 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 
 	private void bdosRESET() {
 		dma = defdma;
+		msc = 1;
+		erm = 0;
 		//drv = 0; // No?
 		// more?
 	}
@@ -904,9 +960,15 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 			} else {
 				usr = (de & 0x1f);
 			}
+		} else if (fnc == 44) {
+			msc = (de & 0xff);
+			if (msc < 1 || msc > 128) msc = 1;
+		} else if (fnc == 45) {
+			erm = (de & 0xff);
 		} else if (fnc <= 48) {
 			hl = bdosDisk(fnc);
 		} else {
+System.err.format("Unsupported BDOS function %d\n", fnc);
 			hl = 0xffff;
 		}
 		cpu.setRegHL(hl);
