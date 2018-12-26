@@ -56,8 +56,17 @@ public class VirtualCpm implements Computer, Runnable {
 		(byte)passE,		// 48 - FLUSH BUFFERS
 	};
 	private byte[] flag3 = {
-		0 // TODO: CP/M 3 functions...
+		(byte)0,		// 98 - FREE BLOCKS
+		(byte)passUSR,		// 99 - TRUNC FILE
+		(byte)-1,		// 100 - SET DIR LABEL *
+		(byte)0,		// 101 - GET DIR LABEL
+		(byte)passUSR,		// 102 - GET FILE STAMPS
+		(byte)-1,		// 103 - WRITE XFCB *
+		(byte)-1,		// 104 - SET DATE/TIME *
+		(byte)0,		// 105 - GET DATE/TIME
+		(byte)0,		// 106 - SET DEF PASSWORD
 	};
+	static String fdelim = " \t\r\000;=<>.:,|[]";
 
 	private Z80 cpu;
 	private Z80Disassembler disas;
@@ -70,11 +79,15 @@ public class VirtualCpm implements Computer, Runnable {
 	private Vector<String[]> cmds;
 
 	private HostFileBdos hfb;
+	// TODO: most/all of these are in the SCB...
 	private int dma;
 	private int drv;
 	private int usr;
 	private int msc;
 	private int erm;
+	private int dlm;
+	private int cmode;
+	private int pret = 0;	// TODO: when to initialize/clear?
 	// TODO: what version to report?
 	private int ver = 0x0031; //0x0022;
 
@@ -258,6 +271,7 @@ public class VirtualCpm implements Computer, Runnable {
 	}
 
 	// Derived from HostFileBdos.copyOutDir()
+	// TODO: stop on invalid CP/M file chars...
 	private boolean setupFCB(byte[] buf, int start, String arg) {
 		boolean afn = false;
 		int x = 0;
@@ -303,6 +317,44 @@ public class VirtualCpm implements Computer, Runnable {
 			buf[start + x++] = (byte)b;
 		}
 		return afn;
+	}
+
+	private int scanFn(int str, int ref) {
+		// TODO: scan filespec
+		return str;
+	}
+
+	private int parseFCB(int de) {
+		int str = (mem[de] & 0xff) |
+				((mem[de + 1] & 0xff) << 8);
+		int fcb = (mem[de + 2] & 0xff) |
+				((mem[de + 3] & 0xff) << 8);
+		int ist = str;
+		// TODO: no fail-safe limit? (aside from FFFF)
+		while (fdelim.indexOf((char)(mem[str] & 0xff)) < 0) {
+			++str;
+			if (str > 0xffff) {
+				return 0xffff;
+			}
+		}
+		String fn = new String(mem, ist, str - ist);
+		boolean afn = setupFCB(mem, fcb, fn.toLowerCase());
+		ist = str;
+		int c = 0;
+		do {
+			c = mem[str++];
+		} while (str <= 0xffff && (c == ' ' || c == '\t'));
+		if (str > 0xffff) {
+			return 0xffff;
+		}
+		if (c == 0 || c == '\r') {
+			return 0;
+		}
+		if (fdelim.indexOf(c) < 0) {
+			return ist;
+		} else {
+			return str;
+		}
 	}
 
 	private void setPage0(String[] argv) {
@@ -716,6 +768,10 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 
 	private void biosTrap(int pc) {
 		int v = (pc & 0xff) / 3;
+		doBIOS(v);
+	}
+
+	private void doBIOS(int v) {
 		switch (v) {
 		case 0:	// cold boot
 		case 1:	// warm boot
@@ -741,8 +797,10 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 			doRET();
 			break;
 		case 5:	// list
+			// TODO: implement bdosCall
 		case 6:	// auxout
 		case 7:	// auxin
+		// TODO: simulate disk I/O on boot tracks...
 		case 8:	// home
 		case 9:	// seldsk
 		case 10: // settrk
@@ -768,24 +826,23 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 		case 31: // resv1
 		case 32: // resv2
 		default:
-			System.err.format("Unsupported BIOS call to %04x\n", pc);
+			System.err.format("Unsupported BIOS call %d\n", v);
 			running = false;
 			break;
 		}
 	}
 
-	private int bdosChar(int fnc) {
+	private int bdosChar(int fnc, int de) {
 		int hl = 0;
-		int e;
+		int e = de & 0xff;
 		switch (fnc) {
 		case 1:	// conin
 			break;
 		case 2:	// conout
-			System.out.append((char)cpu.getRegE());
+			System.out.append((char)e);
 			System.out.flush();
 			break;
 		case 6:	// dircon
-			e = cpu.getRegE();
 			if (e == 0xff) {
 				// TODO: conin/const
 			} else if (e == 0xfe) {
@@ -797,7 +854,16 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 				System.out.flush();
 			}
 			break;
-		case 9:	// print
+		case 9:	// print string
+			e = de;
+			while ((mem[e] & 0xff) != dlm) {
+				System.out.append((char)(mem[e] & 0xff));
+				++e;
+				if (e > 0xffff) {
+					break;
+				}
+			}
+			System.out.flush();
 			break;
 		case 10: // conlin
 			break;
@@ -927,8 +993,109 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 		dma = defdma;
 		msc = 1;
 		erm = 0;
+		dlm = '$';
+		cmode = 0;
 		//drv = 0; // No?
 		// more?
+	}
+
+	// fnc >= 98...
+	private int bdos3Ext(int fnc, int de) {
+		int param = alvbf;
+		if (fnc == 152) {	// parse FCB
+			return parseFCB(de);
+		} else if (fnc > 112) {
+			return 0xffff;
+		}
+		int hl = 0;
+		if (fnc == 112) {	// LIST block
+			int str = (mem[de] & 0xff) |
+				((mem[de + 1] & 0xff) << 8);
+			int len = (mem[de + 2] & 0xff) |
+				((mem[de + 3] & 0xff) << 8);
+			mem[param] = (byte)0;	// LST: id
+			int x = 0;
+			while (len > 0) {
+				int n = 0;
+				// TODO: can this be done w/o copying?
+				while (len > 0 && n < 255) {
+					mem[param + ++n] = mem[str + x++];
+					--len;
+				}
+				// DE,DMA must not be used...
+				hfb.bdosCall(fnc, mem, param, n, de, dma);
+			}
+		} else if (fnc == 111) { // PRINT block (to console)
+			// TODO: echo to LST:?
+			int str = (mem[de] & 0xff) |
+				((mem[de + 1] & 0xff) << 8);
+			int len = (mem[de + 2] & 0xff) |
+				((mem[de + 3] & 0xff) << 8);
+			String out = new String(mem, str, len);
+			System.out.format("%s", out);
+			System.out.flush();
+		} else if (fnc == 110) { // set/get delim
+			if (de == 0xffff) {
+				hl = dlm;
+			} else {
+				dlm = de & 0xff;
+			}
+		} else if (fnc == 109) { // set/get cons mode
+			if (de == 0xffff) {
+				hl = cmode;
+			} else {
+				cmode = de;
+			}
+		} else if (fnc == 108) { // set/get ret code
+			if (de == 0xffff) {
+				hl = pret;
+			} else {
+				pret = de;
+			}
+		} else if (fnc == 107) { // get serial num
+			// TODO: implement something?
+		} else {
+			int flg = flag3[fnc - 98];
+			if (flg < 0) {
+				return hl;
+			}
+			if ((flg & passUSR) != 0) {
+				mem[param] = (byte)usr;
+			}
+			int rsp = hfb.bdosCall(fnc, mem, param, 1, de, dma);
+			if (rsp <= 0) { // ???
+				hl = 0xffff;
+			} else if (rsp == 1) {
+				hl = (mem[param] & 0xff);
+			} else if (rsp == 2) {
+				hl = (mem[param] & 0xff) |
+					((mem[param + 1] & 0xff) << 8);
+			}
+		}
+		return hl;
+	}
+
+	private int doSCB(int de) {
+		return 0;
+	}
+
+	private int dirBIOS(int de) {
+		if (de > 0xfff8) {
+			return 0xffff;
+		}
+		int v = mem[de++] & 0xff;
+		cpu.setRegA(mem[de++] & 0xff);
+		int rp = (mem[de++] & 0xff);
+		rp |= ((mem[de++] & 0xff) << 8);
+		cpu.setRegBC(rp);
+		rp = (mem[de++] & 0xff);
+		rp |= ((mem[de++] & 0xff) << 8);
+		cpu.setRegDE(rp);
+		rp = (mem[de++] & 0xff);
+		rp |= ((mem[de++] & 0xff) << 8);
+		cpu.setRegHL(rp);
+		doBIOS(v);
+		return 0;
 	}
 
 	private void bdosTrap(int pc) {
@@ -945,7 +1112,7 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 			return;
 		}
 		if (fnc < 12 && fnc != 5) {
-			hl = bdosChar(fnc);
+			hl = bdosChar(fnc, de);
 		} else if (fnc == 12) {	// get version
 			hl = ver;
 		} else if (fnc == 13) {	// reset BDOS
@@ -967,6 +1134,16 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 			erm = (de & 0xff);
 		} else if (fnc <= 48) {
 			hl = bdosDisk(fnc);
+		} else if (fnc == 49) {	// SCB
+			hl = doSCB(de);
+		} else if (fnc == 50) {	// direct BIOS
+			hl = dirBIOS(de);
+		} else if (fnc == 59 || fnc == 60) {	// load overlay / call RSX
+			// unclear if this can be made to work,
+			// or if it is needed.
+			hl = 0x00ff;
+		} else if (fnc >= 98) {
+			hl = bdos3Ext(fnc, de);
 		} else {
 System.err.format("Unsupported BDOS function %d\n", fnc);
 			hl = 0xffff;
