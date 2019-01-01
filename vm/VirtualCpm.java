@@ -88,6 +88,7 @@ public class VirtualCpm implements Computer, Runnable {
 	private int dlm;
 	private int cmode;
 	private int pret = 0;	// TODO: when to initialize/clear?
+	private int[] dso = new int[4];
 	// TODO: what version to report?
 	private int ver = 0x0031; //0x0022;
 
@@ -166,6 +167,29 @@ public class VirtualCpm implements Computer, Runnable {
 		msc = 1;
 		erm = 0;
 		dma = defdma;
+		s = props.getProperty("vcpm_dso");
+		if (s != null) {
+			int x = 0;
+			for (String ss : s.split(",")) {
+				if (ss.equalsIgnoreCase("def")) {
+					dso[x++] = 0;
+				} else if (ss.matches("[a-pA-P]:?")) {
+					dso[x++] = Character.toUpperCase(ss.charAt(0)) - 'A' + 1;
+				} else {
+					System.err.format("Invalid drive search order: %s\n", ss);
+					// TODO: fatal? at least stop parsing here.
+					break;
+				}
+			}
+			while (x < dso.length) {
+				dso[x++] = -1;
+			}
+		} else {
+			dso[0] = 0;	// cur drv
+			dso[1] = 1;	// A:
+			dso[2] = -1;	// end
+			dso[3] = -1;	// end
+		}
 	}
 
 	public void reset() {
@@ -421,8 +445,12 @@ public class VirtualCpm implements Computer, Runnable {
 	private File search(int dr, int ur, String cmd) {
 		boolean dot = (cmd.indexOf('.') > 0);
 		int d = dr;
-		if (d < 0) {
-			d = drv;
+		// dr < 0: -1.. = drive search order [0..]
+		if (dr < 0) {
+			d = dso[(0 - dr) - 1] - 1;
+			if (d < 0) {
+				d = drv;
+			}
 		}
 		File path;
 		if (dot) {
@@ -446,8 +474,12 @@ public class VirtualCpm implements Computer, Runnable {
 		if (ur != 0) {
 			return search(dr, 0, cmd);
 		}
-		if (dr < 0) {
-			return search(0, ur, cmd);
+		if (dr < 0) {	// no drive specified
+			--dr;
+			d = (0 - dr) - 1;
+			if (d < dso.length && dso[d] >= 0) {
+				return search(dr, ur, cmd);
+			}
 		}
 		return path; // will fail...
 	}
