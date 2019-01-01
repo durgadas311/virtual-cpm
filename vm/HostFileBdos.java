@@ -502,6 +502,7 @@ public class HostFileBdos implements NetworkServer {
 	static final OutputStream[] lsts = new OutputStream[16];
 	static final int[] lstCid = new int[16];
 	static String dir = null;
+	static String[] dirs = new String[16];
 	static {
 		Arrays.fill(lsts, null);
 		Arrays.fill(lstCid, 0xff);
@@ -538,6 +539,28 @@ public class HostFileBdos implements NetworkServer {
 		curDpb.cks = 0; // perhaps should be non-zero, as
 				// files can change without notice.
 				// But clients shouldn't be handling that.
+		String s = null;
+		// See if individual drive paths are specified...
+		for (int x = 0; x < 16; ++x) {
+			String p = String.format("%s_drive_%c", prefix, (char)('a' + x));
+			s = props.getProperty(p);
+			if (s == null || s.length() == 0) {
+				continue;
+			}
+			File f = new File(s);
+			if (!f.exists()) {
+				try {
+					f.mkdirs();
+				} catch (Exception ee) {}
+			}
+			if (!f.exists() || !f.isDirectory()) {
+				System.err.format("HostFileBdos invalid path in %s: %s\n",
+						p, s);
+				continue;
+			}
+			// dirs[x] is never not null unless the dir exists.
+			dirs[x] = s;
+		}
 		// login this client - unless we wait for LOGIN message with PASSWORD...
 		if (!addClient(clientId)) {
 			// TODO: need to return error and disable this instance...
@@ -545,7 +568,6 @@ public class HostFileBdos implements NetworkServer {
 		}
 
 		// args[0] is our class name, like argv[0] in main().
-		String s = null;
 
 		// In multi-client environment, temp drive is set only by server init.
 		if (HostFileBdos.cfgTab.max == 1) {
@@ -958,7 +980,23 @@ ee.printStackTrace();
 
 	String cpmDrive(int drive) {
 		drive &= 0x0f;
-		return String.format("%s/%c", dir, (char)(drive + 'a'));
+		if (dirs[drive] != null) { // must also exist...
+			return dirs[drive];
+		}
+		File p = new File(String.format("%s/%c", dir, (char)(drive + 'a')));
+		if (!p.exists()) {
+			try {
+				p.mkdirs();
+			} catch (Exception ee) {} 
+		}
+		if (!p.exists() || !p.isDirectory()) {
+			// Let them try in vain...
+			// and leave dirs[x] 'null' and keep trying...???
+			return p.getAbsolutePath();
+		} else {
+			dirs[drive] = p.getAbsolutePath();
+			return dirs[drive];
+		}
 	}
 
 	String cpmFilename(int user, String file) {
@@ -1651,14 +1689,8 @@ ee.printStackTrace();
 			return 1;
 		}
 		curDsk = d;
-		fileName = cpmDrive(d);
+		fileName = cpmDrive(d); // must exist, if possible, now
 		File fi = new File(fileName);
-		if (!fi.exists()) {
-			//System.err.format("Mkdir %s\n", fileName);
-			try {
-				fi.mkdirs();
-			} catch (Exception ee) {}
-		}
 		if (!fi.exists()) {
 			//System.err.format("Seldisk error (%d) %s\n", errno, fileName);
 			curLogVec &= ~(1 << d);

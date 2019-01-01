@@ -121,6 +121,28 @@ public class VirtualCpm implements Computer, Runnable {
 		} else {
 			// TODO: any alternate defaults?
 		}
+		String s = System.getenv("CPMDrives");
+		if (s != null) {
+			int x = 0;
+			for (String ss : s.split(",")) {
+				if (ss == null || ss.length() == 0) {
+					++x;
+					continue;
+				}
+				String p = String.format("vcpm_drive_%c", (char)('a' + x));
+				props.setProperty(p, ss);
+				++x;
+			}
+		}
+		for (int x = 0; x < 16; ++x) {
+			String v = String.format("CPMDrive_%c", (char)('A' + x));
+			s = System.getenv(v);
+			if (s == null || s.length() == 0) {
+				continue;
+			}
+			String p = String.format("vcpm_drive_%c", (char)('a' + x));
+			props.setProperty(p, s);
+		}
 		vcpm = new VirtualCpm(props, argv);
 		vcpm.start();
 	}
