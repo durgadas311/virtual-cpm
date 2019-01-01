@@ -91,6 +91,7 @@ public class VirtualCpm implements Computer, Runnable {
 	private int[] dso = new int[4];
 	// TODO: what version to report?
 	private int ver = 0x0031; //0x0022;
+	private BufferedReader lin;
 
 	static final int wbootv = 0x0000;
 	static final int bdosv = 0x0005;
@@ -158,6 +159,7 @@ public class VirtualCpm implements Computer, Runnable {
 		cpu = new Z80(this);
 		mem = new byte[65536];
 		disas = new Z80DisassemblerMAC80(mem);
+		lin = new BufferedReader(new InputStreamReader(System.in));
 		HostFileBdos.initCfg('P', (byte)0x00, 1, null);
 		HostFileBdos.initLsts(props, "vcpm");
 		hfb = new HostFileBdos(props, "vcpm", new Vector<String>(), 0xfe);
@@ -825,20 +827,41 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 		doBIOS(v);
 	}
 
+	private int constat() {
+		int a = 0;
+		try {
+			if (lin.ready()) {
+				a = 255;
+			}
+		} catch (Exception ee) {}
+		return a;
+	}
+
+	private int conin() {
+		int a = 0;
+		try {
+			a = lin.read();
+			// TODO: how to pass a real ^J/LF?
+			if (a == '\n') a = '\r';
+		} catch (Exception ee) {}
+		return a;
+	}
+
 	private void doBIOS(int v) {
+		int a;
 		switch (v) {
 		case 0:	// cold boot
 		case 1:	// warm boot
 			warmBoot();
 			break;
 		case 2:	// const
-			// TODO: support conin...
-			cpu.setRegA(0);
+			a = constat();
+			cpu.setRegA(a);
 			doRET();
 			break;
 		case 3:	// conin
-			// TODO: support conin...
-			cpu.setRegA(0);
+			a = conin();
+			cpu.setRegA(a);
 			doRET();
 			break;
 		case 4:	// conout
@@ -889,8 +912,12 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 	private int bdosChar(int fnc, int de) {
 		int hl = 0;
 		int e = de & 0xff;
+		String s = null;
+		int mx;
+		int x;
 		switch (fnc) {
 		case 1:	// conin
+			hl = conin();
 			break;
 		case 2:	// conout
 			System.out.append((char)e);
@@ -898,11 +925,14 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 			break;
 		case 6:	// dircon
 			if (e == 0xff) {
-				// TODO: conin/const
+				hl = constat();
+				if (hl != 0) {
+					hl = conin();
+				}
 			} else if (e == 0xfe) {
-				// TODO: const
+				hl = constat();
 			} else if (e == 0xfd) {
-				// TODO: conin
+				hl = conin();
 			} else {
 				System.out.append((char)e);
 				System.out.flush();
@@ -920,8 +950,23 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 			System.out.flush();
 			break;
 		case 10: // conlin
+			if (de == 0) {
+				de = dma;
+			}
+			try {
+				s = lin.readLine();
+			} catch(Exception ee) {}
+			if (s == null) {
+				break;
+			}
+			mx = mem[de] & 0xff;
+			for (x = 0; x < mx && x < s.length(); ++x) {
+				mem[de + 2 + x] = (byte)s.charAt(x);
+			}
+			mem[de + 1] = (byte)x;
 			break;
 		case 11: // const
+			hl = constat();
 			break;
 		case 3:	// auxin
 		case 4:	// auxout
