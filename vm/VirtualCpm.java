@@ -502,10 +502,6 @@ public class VirtualCpm implements Computer, Runnable {
 				if (s.startsWith("#") || s.startsWith(";")) {
 					continue;
 				}
-				if (s.startsWith("<")) {
-					// TODO: how to handle input lines?
-					continue;
-				}
 				for (int x = 1; x < 10; ++x) {
 					String var = String.format("$%d", x);
 					if (x < argv.length) {
@@ -514,7 +510,11 @@ public class VirtualCpm implements Computer, Runnable {
 						s = s.replace(var, "");
 					}
 				}
-				cmds.add(s.split("\\s"));
+				if (s.startsWith("<")) {
+					cmds.add(new String[]{s});
+				} else {
+					cmds.add(s.split("\\s"));
+				}
 				// TODO: or insert in-place:
 				// cmds.add(?, s.split("\\s"));
 			}
@@ -847,6 +847,33 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 		return a;
 	}
 
+	private void conlin(int de) {
+		String s = null;
+		String[] ss;
+		int mx;
+		int x;
+		if (de == 0) {
+			de = dma;
+		}
+		ss = cmds.get(0);
+		if (ss.length == 1 && ss[0].startsWith("<")) {
+			cmds.remove(0);
+			s = ss[0].substring(1);
+			System.out.format("%s", s);
+		} else try {
+			// TODO: prevent echo of LF?
+			s = lin.readLine();
+		} catch(Exception ee) {}
+		if (s == null) {
+			return;
+		}
+		mx = mem[de] & 0xff;
+		for (x = 0; x < mx && x < s.length(); ++x) {
+			mem[de + 2 + x] = (byte)s.charAt(x);
+		}
+		mem[de + 1] = (byte)x;
+	}
+
 	private void doBIOS(int v) {
 		int a;
 		switch (v) {
@@ -912,9 +939,6 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 	private int bdosChar(int fnc, int de) {
 		int hl = 0;
 		int e = de & 0xff;
-		String s = null;
-		int mx;
-		int x;
 		switch (fnc) {
 		case 1:	// conin
 			hl = conin();
@@ -950,20 +974,7 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 			System.out.flush();
 			break;
 		case 10: // conlin
-			if (de == 0) {
-				de = dma;
-			}
-			try {
-				s = lin.readLine();
-			} catch(Exception ee) {}
-			if (s == null) {
-				break;
-			}
-			mx = mem[de] & 0xff;
-			for (x = 0; x < mx && x < s.length(); ++x) {
-				mem[de + 2 + x] = (byte)s.charAt(x);
-			}
-			mem[de + 1] = (byte)x;
+			conlin(de);
 			break;
 		case 11: // const
 			hl = constat();
