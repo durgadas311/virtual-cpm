@@ -145,11 +145,15 @@ public class VirtualCpm implements Computer, Runnable {
 			String p = String.format("vcpm_drive_%c", (char)('a' + x));
 			props.setProperty(p, s);
 		}
-		vcpm = new VirtualCpm(props, argv);
+		s = System.getenv("CPMDefault");
+		if (s == null) {
+			s = "0A:";
+		}
+		vcpm = new VirtualCpm(props, argv, s.toLowerCase());
 		vcpm.start();
 	}
 
-	public VirtualCpm(Properties props, String[] argv) {
+	public VirtualCpm(Properties props, String[] argv, String defdrv) {
 		String s;
 		running = false;
 		stopped = true;
@@ -164,9 +168,13 @@ public class VirtualCpm implements Computer, Runnable {
 		HostFileBdos.initLsts(props, "vcpm");
 		hfb = new HostFileBdos(props, "vcpm", new Vector<String>(), 0xfe);
 		cmds.add(argv);
-		drv = 0;
-		usr = 0;
+		if (!chkSetDef(defdrv)) {
+			// Message already printed...
+			drv = 0;
+			usr = 0;
+		}
 		msc = 1;
+		// TODO: implement BDOS error modes
 		erm = 0;
 		dma = defdma;
 		s = props.getProperty("vcpm_dso");
@@ -541,9 +549,13 @@ public class VirtualCpm implements Computer, Runnable {
 	private void doERA(String[] argv) {
 		// TODO: use hfb.cpmPath() instead?
 		if (setupFCB(mem, fcb1, argv[1].toLowerCase())) {
-			// && mem[fcb1 + 1] == '?' && mem[fcb1 + 9] == '?') {
-			// TODO: prompt "ALL (Y/N)?"
-System.out.println("ERA " + argv[1] + " (Y/N)?");
+			// if (mem[fcb1 + 1] == '?' && mem[fcb1 + 9] == '?') {
+			//	TODO: prompt "ALL (Y/N)?"
+			System.out.format("ERA %s (Y/N)?", argv[1]);
+			String s = getconlin();
+			if (s == null || !s.equalsIgnoreCase("Y")) {
+				return;
+			}
 		}
 		mem[alvbf] = (byte)usr;
 		int rsp = hfb.bdosCall(19, mem, alvbf, 1, fcb1, dma);
@@ -737,20 +749,7 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 		return true;
 	}
 
-	private void doCCP(String[] argv) {
-		String cmd = "";
-		cmd += (char)(drv + 'A');
-		if (usr > 0) {
-			cmd += String.format("%d", usr);
-		}
-		cmd += '>';
-		cmd += argv[0];
-		for (int x = 1; x < argv.length; ++x) {
-			cmd += ' ';
-			cmd += argv[x];
-		}
-		System.out.format("%s\n", cmd);
-		cmd = argv[0].toLowerCase();
+	private boolean chkSetDef(String cmd) {
 		if (cmd.matches("[0-9a-p]+:")) {
 			int ix = 0;
 			int u = 0;
@@ -786,7 +785,27 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 			} else {
 				if (gotd) setDrv(d);
 				if (gotu) usr = u;
+				return true;
 			}
+		}
+		return false;
+	}
+
+	private void doCCP(String[] argv) {
+		String cmd = "";
+		cmd += (char)(drv + 'A');
+		if (usr > 0) {
+			cmd += String.format("%d", usr);
+		}
+		cmd += '>';
+		cmd += argv[0];
+		for (int x = 1; x < argv.length; ++x) {
+			cmd += ' ';
+			cmd += argv[x];
+		}
+		System.out.format("%s\n", cmd);
+		cmd = argv[0].toLowerCase();
+		if (chkSetDef(cmd)) {
 			running = false;
 			return;
 		}
@@ -847,14 +866,9 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 		return a;
 	}
 
-	private void conlin(int de) {
+	private String getconlin() {
 		String s = null;
 		String[] ss;
-		int mx;
-		int x;
-		if (de == 0) {
-			de = dma;
-		}
 		ss = cmds.get(0);
 		if (ss.length == 1 && ss[0].startsWith("<")) {
 			cmds.remove(0);
@@ -864,6 +878,16 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 			// TODO: prevent echo of LF?
 			s = lin.readLine();
 		} catch(Exception ee) {}
+		return s;
+	}
+
+	private void conlin(int de) {
+		int mx;
+		int x;
+		if (de == 0) {
+			de = dma;
+		}
+		String s = getconlin();
 		if (s == null) {
 			return;
 		}
@@ -1050,6 +1074,11 @@ System.out.println("ERA " + argv[1] + " (Y/N)?");
 			// same as setDrv()...
 			drv = de & 0x0f;
 			mem[param] = (byte)drv;
+		} else if (fnc == 17) {	// search first
+			if ((mem[de] & 0xff) == '?' && ver >= 0x0030) {
+				// TODO: must un-do this later?
+				mem[de] |= 0x80;
+			}
 		} else {
 			flg = flags[fnc - 15] & 0xff;
 		}
@@ -1302,7 +1331,8 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 	}
 
 	private void coldStart() {
-		setDrv(0);
+		// already done in ctor...
+		//setDrv(0);
 	}
 
 	private void warmStart() {
