@@ -79,18 +79,6 @@ public class VirtualCpm implements Computer, Runnable {
 	private Vector<String[]> cmds;
 
 	private HostFileBdos hfb;
-	// TODO: most/all of these are in the SCB...
-	private int dma;
-	private int drv;
-	private int usr;
-	private int msc;
-	private int erm;
-	private int dlm;
-	private int cmode;
-	private int pret = 0;	// TODO: when to initialize/clear?
-	private int[] dso = new int[4];
-	// TODO: what version to report?
-	private int ver = 0x0031; //0x0022;
 	private BufferedReader lin;
 
 	static final int wbootv = 0x0000;
@@ -100,11 +88,28 @@ public class VirtualCpm implements Computer, Runnable {
 	static final int defdma = 0x0080;
 	static final int tpa = 0x0100;
 	static final int biose = 0xff00;
+	static final int nbios = 33;
 	static final int wboot = biose + 3;
 	static final int memtop = biose - 512;	// need space for ALV
 	static final int bdose = memtop + 6;
 	static final int dpbuf = bdose + 3;
 	static final int alvbf = dpbuf + 17;
+	static final int scb = biose + (nbios * 3);	// requires 100 bytes
+
+	// SCB addresses used internally
+	static final int SCB_VER = scb + 0x05;
+	static final int SCB_PGMRET = scb + 0x10;
+	static final int SCB_CMODE = scb + 0x33;
+	static final int SCB_OUTDLM = scb + 0x37;
+	static final int SCB_SCBADD = scb + 0x3a; // base address of SCB
+	static final int SCB_DMAAD = scb + 0x3c;
+	static final int SCB_DRV = scb + 0x3e;
+	static final int SCB_USER = scb + 0x44;
+	static final int SCB_MULTCNT = scb + 0x4a;
+	static final int SCB_ERRMD = scb + 0x4b;
+	static final int SCB_DSO = scb + 0x4c;
+	static final int SCB_TMP = scb + 0x50;
+	static final int SCB_DATE = scb + 0x58; // date,hours,min,sec
 
 	private static VirtualCpm vcpm;
 
@@ -170,35 +175,39 @@ public class VirtualCpm implements Computer, Runnable {
 		cmds.add(argv);
 		if (!chkSetDef(defdrv)) {
 			// Message already printed...
-			drv = 0;
-			usr = 0;
+			setDrv(0);
+			mem[SCB_USER] = 0;
 		}
-		msc = 1;
+		mem[SCB_MULTCNT] = 1;
 		// TODO: implement BDOS error modes
-		erm = 0;
-		dma = defdma;
+		mem[SCB_ERRMD] = (byte)0;
+		setWORD(SCB_DMAAD, defdma);
+		setWORD(SCB_PGMRET, 0);	// TODO: when, if ever, is this cleared?
 		s = props.getProperty("vcpm_dso");
 		if (s != null) {
 			int x = 0;
 			for (String ss : s.split(",")) {
+				if (x >= 4) {
+					break;
+				}
 				if (ss.equalsIgnoreCase("def")) {
-					dso[x++] = 0;
+					mem[SCB_DSO + x++] = 0;
 				} else if (ss.matches("[a-pA-P]:?")) {
-					dso[x++] = Character.toUpperCase(ss.charAt(0)) - 'A' + 1;
+					mem[SCB_DSO + x++] = (byte)(Character.toUpperCase(ss.charAt(0)) - 'A' + 1);
 				} else {
 					System.err.format("Invalid drive search order: %s\n", ss);
 					// TODO: fatal? at least stop parsing here.
 					break;
 				}
 			}
-			while (x < dso.length) {
-				dso[x++] = -1;
+			while (x < 4) {
+				mem[SCB_DSO + x++] = (byte)-1;
 			}
 		} else {
-			dso[0] = 0;	// cur drv
-			dso[1] = 1;	// A:
-			dso[2] = -1;	// end
-			dso[3] = -1;	// end
+			mem[SCB_DSO + 0] = (byte)0;	// cur drv
+			mem[SCB_DSO + 1] = (byte)1;	// A:
+			mem[SCB_DSO + 2] = (byte)-1;	// end
+			mem[SCB_DSO + 3] = (byte)-1;	// end
 		}
 	}
 
@@ -283,6 +292,17 @@ public class VirtualCpm implements Computer, Runnable {
 	public void execDone() {
 	}
 
+	private int getWORD(int adr) {
+		int val = mem[adr + 0] & 0xff;
+		val |= ((mem[adr + 1] & 0xff) << 8);
+		return val;
+	}
+
+	private void setWORD(int adr, int vec) {
+		mem[adr + 0] = (byte)vec;
+		mem[adr + 1] = (byte)(vec >> 8);
+	}
+
 	private void setJMP(int adr, int vec) {
 		mem[adr + 0] = (byte)0xc3;
 		mem[adr + 1] = (byte)vec;
@@ -293,10 +313,13 @@ public class VirtualCpm implements Computer, Runnable {
 		setJMP(wbootv, wboot);
 		setJMP(bdosv, bdose);
 		setJMP(bdose, bdose);
-		for (int x = 0; x < 33; ++x) {
+		for (int x = 0; x < nbios; ++x) {
 			int v = biose + (x * 3);
 			setJMP(v, v);
 		}
+		// Setup SCB as needed...
+		mem[SCB_VER] = (byte)0x31;	// TODO: allow custom?
+		setWORD(SCB_SCBADD, scb);
 	}
 
 	private void warmBoot() {
@@ -443,13 +466,13 @@ public class VirtualCpm implements Computer, Runnable {
 		int v = (1 << (d & 0x0f));
 		mem[alvbf] = (byte)v;
 		mem[alvbf + 1] = (byte)(v >> 8);
-		hfb.bdosCall(38, mem, alvbf, 2, fcb1, dma);
+		hfb.bdosCall(38, mem, alvbf, 2, fcb1, defdma);
 	}
 
 	private void setDrv(int d) {
-		drv = d & 0x0f;
-		mem[alvbf] = (byte)drv;
-		hfb.bdosCall(14, mem, alvbf, 1, fcb1, dma);
+		mem[SCB_DRV] = (byte)(d & 0x0f);
+		mem[alvbf] = mem[SCB_DRV];
+		hfb.bdosCall(14, mem, alvbf, 1, fcb1, defdma);
 	}
 
 	private File search(int dr, int ur, String cmd) {
@@ -457,9 +480,9 @@ public class VirtualCpm implements Computer, Runnable {
 		int d = dr;
 		// dr < 0: -1.. = drive search order [0..]
 		if (dr < 0) {
-			d = dso[(0 - dr) - 1] - 1;
+			d = mem[SCB_DSO + (0 - dr) - 1] - 1;
 			if (d < 0) {
-				d = drv;
+				d = mem[SCB_DRV];
 			}
 		}
 		File path;
@@ -487,7 +510,7 @@ public class VirtualCpm implements Computer, Runnable {
 		if (dr < 0) {	// no drive specified
 			--dr;
 			d = (0 - dr) - 1;
-			if (d < dso.length && dso[d] >= 0) {
+			if (d < 4 && mem[SCB_DSO + d] >= 0) {
 				return search(dr, ur, cmd);
 			}
 		}
@@ -557,8 +580,8 @@ public class VirtualCpm implements Computer, Runnable {
 				return;
 			}
 		}
-		mem[alvbf] = (byte)usr;
-		int rsp = hfb.bdosCall(19, mem, alvbf, 1, fcb1, dma);
+		mem[alvbf] = mem[SCB_USER];
+		int rsp = hfb.bdosCall(19, mem, alvbf, 1, fcb1, defdma);
 		int ent = mem[alvbf] & 0xff;
 		if (ent > 3) { // assume FF
 			// TODO: specific failure?
@@ -590,12 +613,12 @@ public class VirtualCpm implements Computer, Runnable {
 	}
 
 	private String getFileDrive(String fn) {
-		int d = drv;
+		int d = mem[SCB_DRV];
 		if (fn.matches("[a-p]:.*")) {
 			d = fn.charAt(0) - 'a';
 			fn = fn.substring(2);
 		}
-		return hfb.cpmPath(d, usr, fn);
+		return hfb.cpmPath(d, mem[SCB_USER], fn);
 	}
 
 	private void doREN(String[] argv) {
@@ -651,7 +674,7 @@ public class VirtualCpm implements Computer, Runnable {
 		if (mem[fcb1] != 0) {
 			d += (char)((mem[fcb1] & 0xff) - 1 + 'A');
 		} else {
-			d += (char)(drv + 'A');
+			d += (char)(mem[SCB_DRV] + 'A');
 		}
 		d += ':';
 		d += ' ';
@@ -659,9 +682,9 @@ public class VirtualCpm implements Computer, Runnable {
 		int cnt = 0;
 		int col = 0;
 		do {
-			mem[alvbf] = (byte)drv;
-			mem[alvbf + 1] = (byte)usr;
-			int rsp = hfb.bdosCall(fnc, mem, alvbf, 2, fcb1, dma);
+			mem[alvbf] = mem[SCB_DRV];
+			mem[alvbf + 1] = mem[SCB_USER];
+			int rsp = hfb.bdosCall(fnc, mem, alvbf, 2, fcb1, defdma);
 			int ent = mem[alvbf] & 0xff;
 			if (ent > 3) { // assume FF
 				break;
@@ -784,7 +807,7 @@ public class VirtualCpm implements Computer, Runnable {
 				// TODO: abort everything?
 			} else {
 				if (gotd) setDrv(d);
-				if (gotu) usr = u;
+				if (gotu) mem[SCB_USER] = (byte)u;
 				return true;
 			}
 		}
@@ -793,9 +816,9 @@ public class VirtualCpm implements Computer, Runnable {
 
 	private void doCCP(String[] argv) {
 		String cmd = "";
-		cmd += (char)(drv + 'A');
-		if (usr > 0) {
-			cmd += String.format("%d", usr);
+		cmd += (char)(mem[SCB_DRV] + 'A');
+		if (mem[SCB_USER] > 0) {
+			cmd += String.format("%d", mem[SCB_USER]);
 		}
 		cmd += '>';
 		cmd += argv[0];
@@ -885,7 +908,7 @@ public class VirtualCpm implements Computer, Runnable {
 		int mx;
 		int x;
 		if (de == 0) {
-			de = dma;
+			de = getWORD(SCB_DMAAD);
 		}
 		String s = getconlin();
 		if (s == null) {
@@ -924,6 +947,16 @@ public class VirtualCpm implements Computer, Runnable {
 			cpu.setRegA(0xff);
 			doRET();
 			break;
+		case 26: // time
+			// We don't support time set.
+			// We also don't support "continuous" mode,
+			// or any other "watching" of the SCB values.
+			// (users MUST call this every time)
+			a = cpu.getRegC();
+			if (a == 0) { // get time
+				hfb.bdosCall(105, mem, SCB_DATE, 1, fcb1, defdma);
+			}
+			break;
 		case 5:	// list
 			// TODO: implement bdosCall
 		case 6:	// auxout
@@ -946,7 +979,6 @@ public class VirtualCpm implements Computer, Runnable {
 		case 23: // multio
 		case 24: // flush
 		case 25: // move
-		case 26: // time
 		case 27: // selmem
 		case 28: // setbnk
 		case 29: // xmove
@@ -988,7 +1020,7 @@ public class VirtualCpm implements Computer, Runnable {
 			break;
 		case 9:	// print string
 			e = de;
-			while ((mem[e] & 0xff) != dlm) {
+			while ((mem[e] & 0xff) != mem[SCB_OUTDLM]) {
 				System.out.append((char)(mem[e] & 0xff));
 				++e;
 				if (e > 0xffff) {
@@ -1028,15 +1060,15 @@ public class VirtualCpm implements Computer, Runnable {
 	}
 
 	private int mscCall(int fnc, byte[] mem, int param, int len, int fcb, int dma) {
-		int cnt = msc;
+		int cnt = mem[SCB_MULTCNT] & 0xff;
 		int rsp = 0;
 		int rr = getRR(mem, fcb);
 		while (cnt > 0) {
 			// all these pass USER
-			mem[param] = (byte)usr;
+			mem[param] = mem[SCB_USER];
 			rsp = hfb.bdosCall(fnc, mem, param, len, fcb, dma);
 			if (mem[param] != 0) {
-				cnt = msc - cnt;
+				cnt = (mem[SCB_MULTCNT] & 0xff) - cnt;
 				break;
 			}
 			--cnt;
@@ -1049,7 +1081,7 @@ public class VirtualCpm implements Computer, Runnable {
 			rsp = mem[param];
 			putRR(mem, fcb, rr);
 			// TODO: reset file pointer! need to point dma to unused space!
-			mem[param] = (byte)usr;
+			mem[param] = mem[SCB_USER];
 			hfb.bdosCall(33, mem, param, len, fcb, 0xff80);
 			mem[param] = (byte)rsp;
 		}
@@ -1072,10 +1104,10 @@ public class VirtualCpm implements Computer, Runnable {
 			++len;	// the only case where 'len' matters
 		} else if (fnc == 14) {	// select drive
 			// same as setDrv()...
-			drv = de & 0x0f;
-			mem[param] = (byte)drv;
+			mem[SCB_DRV] = (byte)(de & 0x0f);
+			mem[param] = mem[SCB_DRV];
 		} else if (fnc == 17) {	// search first
-			if ((mem[de] & 0xff) == '?' && ver >= 0x0030) {
+			if ((mem[de] & 0xff) == '?' && mem[SCB_VER] >= 0x30) {
 				// TODO: must un-do this later?
 				mem[de] |= 0x80;
 			}
@@ -1093,15 +1125,15 @@ public class VirtualCpm implements Computer, Runnable {
 			mem[param + 1] = (byte)(de >> 8);
 			++len;
 		} else if ((flg & passUSR) != 0) {
-			mem[param] = (byte)usr;
+			mem[param] = mem[SCB_USER];
 		} else if ((flg & passDRV) != 0) {
-			mem[param] = (byte)drv;
+			mem[param] = mem[SCB_DRV];
 		}
 		int rsp;
 		if ((flg & useMSC) != 0) {
-			rsp = mscCall(fnc, mem, param, len, de, dma);
+			rsp = mscCall(fnc, mem, param, len, de, getWORD(SCB_DMAAD));
 		} else {
-			rsp = hfb.bdosCall(fnc, mem, param, len, de, dma);
+			rsp = hfb.bdosCall(fnc, mem, param, len, de, getWORD(SCB_DMAAD));
 		}
 		if (rsp <= 0) { // ???
 			hl = 0xffff;
@@ -1113,14 +1145,15 @@ public class VirtualCpm implements Computer, Runnable {
 		} else if (fnc == 17 || fnc == 18) {	// SEARCH
 			hl = (mem[param] & 0xff);
 			if (rsp >= 128) {
-				System.arraycopy(mem, param + 1, mem, dma, 128);
+				System.arraycopy(mem, param + 1, mem, getWORD(SCB_DMAAD), 128);
 			} else {	// must be 32...
 				int ix = (hl << 5);
-				System.arraycopy(mem, param + 1, mem, dma + ix, 32);
+				System.arraycopy(mem, param + 1, mem, getWORD(SCB_DMAAD) + ix, 32);
 			}
 		} else if (fnc == 27) {	// get ALV
 			hl = alvbf;
 		} else if (fnc == 46) {
+			int dma = getWORD(SCB_DMAAD);
 			mem[dma] = mem[param];
 			mem[dma + 1] = mem[param + 1];
 			mem[dma + 2] = mem[param + 2];
@@ -1129,11 +1162,11 @@ public class VirtualCpm implements Computer, Runnable {
 	}
 
 	private void bdosRESET() {
-		dma = defdma;
-		msc = 1;
-		erm = 0;
-		dlm = '$';
-		cmode = 0;
+		setWORD(SCB_DMAAD, defdma);
+		mem[SCB_MULTCNT] = (byte)1;
+		mem[SCB_ERRMD] = (byte)0;
+		mem[SCB_OUTDLM] = '$';
+		setWORD(SCB_CMODE, 0);
 		//drv = 0; // No?
 		// more?
 	}
@@ -1162,7 +1195,7 @@ public class VirtualCpm implements Computer, Runnable {
 					--len;
 				}
 				// DE,DMA must not be used...
-				hfb.bdosCall(fnc, mem, param, n, de, dma);
+				hfb.bdosCall(fnc, mem, param, n, de, defdma);
 			}
 		} else if (fnc == 111) { // PRINT block (to console)
 			// TODO: echo to LST:?
@@ -1175,21 +1208,21 @@ public class VirtualCpm implements Computer, Runnable {
 			System.out.flush();
 		} else if (fnc == 110) { // set/get delim
 			if (de == 0xffff) {
-				hl = dlm;
+				hl = mem[SCB_OUTDLM];
 			} else {
-				dlm = de & 0xff;
+				mem[SCB_OUTDLM] = (byte)(de & 0xff);
 			}
 		} else if (fnc == 109) { // set/get cons mode
 			if (de == 0xffff) {
-				hl = cmode;
+				hl = getWORD(SCB_CMODE);
 			} else {
-				cmode = de;
+				setWORD(SCB_CMODE, de);
 			}
 		} else if (fnc == 108) { // set/get ret code
 			if (de == 0xffff) {
-				hl = pret;
+				hl = getWORD(SCB_PGMRET);
 			} else {
-				pret = de;
+				setWORD(SCB_PGMRET, de);
 			}
 		} else if (fnc == 107) { // get serial num
 			// TODO: implement something?
@@ -1199,9 +1232,9 @@ public class VirtualCpm implements Computer, Runnable {
 				return hl;
 			}
 			if ((flg & passUSR) != 0) {
-				mem[param] = (byte)usr;
+				mem[param] = mem[SCB_USER];
 			}
-			int rsp = hfb.bdosCall(fnc, mem, param, 1, de, dma);
+			int rsp = hfb.bdosCall(fnc, mem, param, 1, de, getWORD(SCB_DMAAD));
 			if (rsp <= 0) { // ???
 				hl = 0xffff;
 			} else if (rsp == 1) {
@@ -1215,7 +1248,26 @@ public class VirtualCpm implements Computer, Runnable {
 	}
 
 	private int doSCB(int de) {
-		return 0;
+		int hl = 0;
+		int off = mem[de] & 0xff;
+		if (off >= 100) {
+			return hl;
+		}
+		boolean get = (mem[de + 1] == 0);
+		if (get) {
+			hl = mem[scb + off] & 0xff;
+			if ((mem[de + 1] & 1) == 0) {
+				hl |= ((mem[scb + off + 1] & 0xff) << 8);
+			}
+			return hl;
+		}
+		int val = (mem[de + 2] & 0xff) |
+			((mem[de + 3] & 0xff) << 8);
+		mem[scb + off] = (byte)val;
+		if ((mem[de + 1] & 1) == 0) {
+			mem[scb + off + 1] = (byte)(val >> 8);
+		}
+		return hl;
 	}
 
 	private int dirBIOS(int de) {
@@ -1253,24 +1305,25 @@ public class VirtualCpm implements Computer, Runnable {
 		if (fnc < 12 && fnc != 5) {
 			hl = bdosChar(fnc, de);
 		} else if (fnc == 12) {	// get version
-			hl = ver;
+			hl = mem[SCB_VER] & 0xff;
 		} else if (fnc == 13) {	// reset BDOS
 			bdosRESET();
 		} else if (fnc == 25) {	// get cur drv
-			hl = drv;
+			hl = mem[SCB_DRV];
 		} else if (fnc == 26) {	// set DMA
-			dma = de;
+			setWORD(SCB_DMAAD, de);
 		} else if (fnc == 32) {	// set/get USER
 			if ((de & 0xff) == 0xff) {
-				hl = usr;
+				hl = mem[SCB_USER];
 			} else {
-				usr = (de & 0x1f);
+				mem[SCB_USER] = (byte)(de & 0x1f);
 			}
 		} else if (fnc == 44) {
-			msc = (de & 0xff);
-			if (msc < 1 || msc > 128) msc = 1;
+			de &= 0xff;
+			if (de < 1 || de > 128) de = 1;
+			mem[SCB_MULTCNT] = (byte)de;
 		} else if (fnc == 45) {
-			erm = (de & 0xff);
+			mem[SCB_ERRMD] = (byte)de;
 		} else if (fnc <= 48) {
 			hl = bdosDisk(fnc);
 		} else if (fnc == 49) {	// SCB
@@ -1337,12 +1390,12 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 
 	private void warmStart() {
 		// TODO: 2.2 vs 3.1
-		if ((ver & 0xff) == 0x31) {
-			hfb.bdosCall(98, mem, alvbf, 1, fcb1, dma);
+		if (mem[SCB_VER] == 0x31) {
+			hfb.bdosCall(98, mem, alvbf, 1, fcb1, defdma);
 		} else {
 			mem[alvbf] = (byte)0xff;
 			mem[alvbf + 1] = (byte)0xff;
-			hfb.bdosCall(39, mem, alvbf, 2, fcb1, dma);
+			hfb.bdosCall(39, mem, alvbf, 2, fcb1, defdma);
 		}
 		coldBoot(); // always do this?
 		bdosRESET();
