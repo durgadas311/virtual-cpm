@@ -176,22 +176,24 @@ public class VirtualCpm implements Computer, Runnable {
 		if (!chkSetDef(defdrv)) {
 			// Message already printed...
 			setDrv(0);
-			mem[SCB_USER] = 0;
+			mem[SCB_USER] = (byte)0;
 		}
-		mem[SCB_MULTCNT] = 1;
+		mem[SCB_MULTCNT] = (byte)1;
 		// TODO: implement BDOS error modes
 		mem[SCB_ERRMD] = (byte)0;
+		mem[SCB_TMP] = (byte)0;	// temp = def
 		setWORD(SCB_DMAAD, defdma);
 		setWORD(SCB_PGMRET, 0);	// TODO: when, if ever, is this cleared?
+		mem[SCB_VER] = (byte)0x31;	// TODO: allow custom?
 		s = props.getProperty("vcpm_dso");
+		int x = 0;
 		if (s != null) {
-			int x = 0;
 			for (String ss : s.split(",")) {
 				if (x >= 4) {
 					break;
 				}
 				if (ss.equalsIgnoreCase("def")) {
-					mem[SCB_DSO + x++] = 0;
+					mem[SCB_DSO + x++] = (byte)0;
 				} else if (ss.matches("[a-pA-P]:?")) {
 					mem[SCB_DSO + x++] = (byte)(Character.toUpperCase(ss.charAt(0)) - 'A' + 1);
 				} else {
@@ -200,14 +202,12 @@ public class VirtualCpm implements Computer, Runnable {
 					break;
 				}
 			}
-			while (x < 4) {
-				mem[SCB_DSO + x++] = (byte)-1;
-			}
 		} else {
-			mem[SCB_DSO + 0] = (byte)0;	// cur drv
-			mem[SCB_DSO + 1] = (byte)1;	// A:
-			mem[SCB_DSO + 2] = (byte)-1;	// end
-			mem[SCB_DSO + 3] = (byte)-1;	// end
+			mem[SCB_DSO + x++] = (byte)0;	// cur drv
+			mem[SCB_DSO + x++] = (byte)1;	// A:
+		}
+		while (x < 4) {
+			mem[SCB_DSO + x++] = (byte)-1;
 		}
 	}
 
@@ -318,7 +318,6 @@ public class VirtualCpm implements Computer, Runnable {
 			setJMP(v, v);
 		}
 		// Setup SCB as needed...
-		mem[SCB_VER] = (byte)0x31;	// TODO: allow custom?
 		setWORD(SCB_SCBADD, scb);
 	}
 
@@ -1165,7 +1164,7 @@ public class VirtualCpm implements Computer, Runnable {
 		setWORD(SCB_DMAAD, defdma);
 		mem[SCB_MULTCNT] = (byte)1;
 		mem[SCB_ERRMD] = (byte)0;
-		mem[SCB_OUTDLM] = '$';
+		mem[SCB_OUTDLM] = (byte)'$';
 		setWORD(SCB_CMODE, 0);
 		//drv = 0; // No?
 		// more?
