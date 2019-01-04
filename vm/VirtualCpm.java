@@ -137,7 +137,7 @@ public class VirtualCpm implements Computer, Runnable {
 					continue;
 				}
 				String p = String.format("vcpm_drive_%c", (char)('a' + x));
-				props.setProperty(p, ss);
+				props.setProperty(p, ss.trim());
 				++x;
 			}
 		}
@@ -148,7 +148,7 @@ public class VirtualCpm implements Computer, Runnable {
 				continue;
 			}
 			String p = String.format("vcpm_drive_%c", (char)('a' + x));
-			props.setProperty(p, s);
+			props.setProperty(p, s.trim());
 		}
 		s = System.getenv("CPMDefault");
 		if (s == null) {
@@ -1080,8 +1080,9 @@ public class VirtualCpm implements Computer, Runnable {
 			rsp = mem[param];
 			putRR(mem, fcb, rr);
 			// TODO: reset file pointer! need to point dma to unused space!
+			// Use "-1" to indicate seek-only (no read).
 			mem[param] = mem[SCB_USER];
-			hfb.bdosCall(33, mem, param, len, fcb, 0xff80);
+			hfb.bdosCall(33, mem, param, len, fcb, -1);
 			mem[param] = (byte)rsp;
 		}
 		// put 'cnt' into H...

@@ -547,6 +547,7 @@ public class HostFileBdos implements NetworkServer {
 			if (s == null || s.length() == 0) {
 				continue;
 			}
+//System.err.format("%c: = %s\n", (char)('A' + x), s);
 			File f = new File(s);
 			if (!f.exists()) {
 				try {
@@ -2072,25 +2073,27 @@ ee.printStackTrace();
 			return 1;
 		}
 		seekFile(fcb, of);
-		int rc = 0;
-		try {
-			rc = of.fd.read(msgbuf, dmaadr, 128);
-			if (rc < 0) {
-				rc = 0;
+		if (dmaadr >= 0) {
+			int rc = 0;
+			try {
+				rc = of.fd.read(msgbuf, dmaadr, 128);
+				if (rc < 0) {
+					rc = 0;
+				}
+			} catch (Exception ee) {
+				rc = -1;
 			}
-		} catch (Exception ee) {
-			rc = -1;
+			seekFile(fcb, of);
+			if (rc < 0) {
+				msgbuf[start] = (byte)255;
+				return 1;
+			}
+			if (rc == 0) {
+				msgbuf[start] = (byte)1;
+				return 1;
+			}
+			Arrays.fill(msgbuf, dmaadr + rc, dmaadr + 128, (byte)0x1a);
 		}
-		seekFile(fcb, of);
-		if (rc < 0) {
-			msgbuf[start] = (byte)255;
-			return 1;
-		}
-		if (rc == 0) {
-			msgbuf[start] = (byte)1;
-			return 1;
-		}
-		Arrays.fill(msgbuf, dmaadr + rc, dmaadr + 128, (byte)0x1a);
 		// detect media change?
 		fcb.putIO(msgbuf, fcbadr, true);
 		return 37 + 128;
