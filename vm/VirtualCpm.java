@@ -99,6 +99,9 @@ public class VirtualCpm implements Computer, Runnable {
 	// SCB addresses used internally
 	static final int SCB_VER = scb + 0x05;
 	static final int SCB_PGMRET = scb + 0x10;
+	static final int SCB_CONWID = scb + 0x1a;
+	static final int SCB_CONLEN = scb + 0x1c;
+	static final int SCB_PMODE = scb + 0x2c;
 	static final int SCB_CMODE = scb + 0x33;
 	static final int SCB_OUTDLM = scb + 0x37;
 	static final int SCB_SCBADD = scb + 0x3a; // base address of SCB
@@ -178,6 +181,9 @@ public class VirtualCpm implements Computer, Runnable {
 			setDrv(0);
 			mem[SCB_USER] = (byte)0;
 		}
+		mem[SCB_CONWID] = (byte)80;
+		mem[SCB_CONLEN] = (byte)24;
+		mem[SCB_PMODE] = (byte)1; // paging makes no sense?
 		mem[SCB_MULTCNT] = (byte)1;
 		// TODO: implement BDOS error modes
 		mem[SCB_ERRMD] = (byte)0;
