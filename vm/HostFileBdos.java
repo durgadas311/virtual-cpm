@@ -592,8 +592,12 @@ public class HostFileBdos implements NetworkServer {
 				}
 			}
 		}
-		System.err.format("Creating HostFileBdos %02x device with root dir %s\n",
+		boolean silent = (props.getProperty("silent") != null);
+		if (!silent) {
+			System.err.format("Creating HostFileBdos %02x device " +
+						"with root dir %s\n",
 						HostFileBdos.cfgTab.id, dir);
+		}
 	}
 
 	private static void initLst(Properties props, int lid, String s) {
