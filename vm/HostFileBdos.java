@@ -205,13 +205,14 @@ public class HostFileBdos implements NetworkServer {
 		}
 	}
 
+	static final long epoch = (long)2923 * 86400 * 1000;
 	// These need to become methods to put/get from byte[]...
 	class cpmFcbDate {
 		public static final int byteLength = 4;
 		public long timet;
 
 		public cpmFcbDate() {
-			timet = 0;
+			timet = epoch;
 		}
 		public void put(byte[] buf, int start) {
 			unix2cpmdate(timet, buf, start, false);

@@ -1103,6 +1103,7 @@ public class VirtualCpm implements Computer, Runnable {
 		int hl = 0;
 		int len = 1;	// most don't care...
 		int flg = 0;
+		int undo = -1;
 		if (fnc == 5) {	// list output
 			// TODO: support CP/M 3 "list buffer"
 			mem[param] = (byte)0;	// LST: id
@@ -1114,8 +1115,8 @@ public class VirtualCpm implements Computer, Runnable {
 			mem[param] = mem[SCB_DRV];
 		} else if (fnc == 17) {	// search first
 			if ((mem[de] & 0xff) == '?' && mem[SCB_VER] >= 0x30) {
-				// TODO: must un-do this later?
 				mem[de] |= 0x80;
+				undo = de;
 			}
 		} else {
 			flg = flags[fnc - 15] & 0xff;
@@ -1149,12 +1150,14 @@ public class VirtualCpm implements Computer, Runnable {
 			hl = (mem[param] & 0xff) |
 				((mem[param + 1] & 0xff) << 8);
 		} else if (fnc == 17 || fnc == 18) {	// SEARCH
+			if (undo > 0) mem[undo] &= 0x7f;
 			hl = (mem[param] & 0xff);
 			if (rsp >= 128) {
 				System.arraycopy(mem, param + 1, mem, getWORD(SCB_DMAAD), 128);
-			} else {	// must be 32...
-				int ix = (hl << 5);
+			} else if (rsp >= 32) {	// must be 32...
+				int ix = hl << 5;
 				System.arraycopy(mem, param + 1, mem, getWORD(SCB_DMAAD) + ix, 32);
+			} else {	// must be 1... already trapped above...
 			}
 		} else if (fnc == 27) {	// get ALV
 			hl = alvbf;
