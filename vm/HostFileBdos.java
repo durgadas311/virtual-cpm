@@ -1061,7 +1061,9 @@ ee.printStackTrace();
 			}
 			//System.err.format("looking at %s... %s\n", de.d_name, find.pat);
 			// need to prevent "*.*" at user 0 from matching all users!
-			if (usr == 0 && (de.charAt(1) == ':' || de.charAt(2) == ':')) {
+			if (usr == 0 &&
+				(de.length() > 1 && de.charAt(1) == ':' ||
+				de.length() > 2 && de.charAt(2) == ':')) {
 				continue;
 			}
 			if (de.matches(find.pat)) {
