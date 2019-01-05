@@ -175,6 +175,8 @@ public class VirtualCpm implements Computer, Runnable {
 		HostFileBdos.initCfg('P', (byte)0x00, 1, null);
 		HostFileBdos.initLsts(props, "vcpm");
 		hfb = new HostFileBdos(props, "vcpm", new Vector<String>(), 0xfe);
+		mem[alvbf] = (byte)0b10000000; // COMPAT_PRO - don't lock files
+		hfb.bdosCall(70, mem, alvbf, 1, fcb1, defdma);
 		cmds.add(argv);
 		if (!chkSetDef(defdrv)) {
 			// Message already printed...
