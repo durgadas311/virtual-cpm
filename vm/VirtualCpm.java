@@ -898,17 +898,22 @@ public class VirtualCpm implements Computer, Runnable {
 
 	private String getconlin() {
 		String s = null;
-		String[] ss;
-		ss = cmds.get(0);
-		if (ss.length == 1 && ss[0].startsWith("<")) {
-			cmds.remove(0);
-			s = ss[0].substring(1);
-			System.out.format("%s", s);
-		} else try {
+		if (cmds.size() > 0) {
+			String[] ss;
+			ss = cmds.get(0);
+			if (ss.length == 1 && ss[0].startsWith("<")) {
+				cmds.remove(0);
+				s = ss[0].substring(1);
+				System.out.format("%s", s);
+				return s;
+			}
+		}
+		try {
 			// TODO: prevent echo of LF?
 			s = lin.readLine();
+			return s;
 		} catch(Exception ee) {}
-		return s;
+		return null;
 	}
 
 	private void conlin(int de) {
