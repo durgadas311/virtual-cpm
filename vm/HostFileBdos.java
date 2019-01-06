@@ -411,6 +411,8 @@ public class HostFileBdos implements NetworkServer {
 
 	class OpenFile {
 		public RandomAccessFile fd;
+		public byte ext;
+		public byte cr;
 		public FileLock flk;
 		public Vector<FileLock> rlks;
 		public int drv; // CP/M drive vector of file
@@ -1376,11 +1378,14 @@ ee.printStackTrace();
 			}
 		}
 		long r = fcb.rr;
+		// TODO: update fcb.ext
 		r *= 128;
 		try {
 			of.fd.seek(r);
 		} catch (Exception ee) {}
 		fcb.s1 = fcb.cr;
+		of.ext = fcb.ext;
+		of.cr = fcb.cr;
 	}
 
 	int newFileFcb() {
@@ -1556,7 +1561,7 @@ ee.printStackTrace();
 		if (!fi.canWrite()) {
 			fcb.SET_RO();
 		}
-		fcb.ext = 0;
+		//fcb.ext = 0; // must honor open extent
 		long len = fi.length();
 		len = (len + 127) / 128;	// num records
 		fcb.rc = (byte)(len > 127 ? 128 : (len & 0x7f));
@@ -1742,8 +1747,10 @@ ee.printStackTrace();
 		}
 		msgbuf[start] = (byte)0;
 		if (fcb.s2 == 0) {
-			// special truncate for SUBMIT (CCP)
-			long ln = fcb.rc;
+			// special truncate for SUBMIT (CCP).
+			// But some others end up here, so must beware.
+			long ln = fcb.cr & 0xff;
+			ln += fcb.ext * 128;
 			ln *= 128;
 			try {
 				of.fd.setLength(ln);
@@ -1920,6 +1927,15 @@ ee.printStackTrace();
 		return 1;
 	}
 
+	private void traceFcb(String op, cpmFcb fcb, OpenFile of) {
+		long p = -1;
+		try {
+			p = of.fd.getFilePointer();
+		} catch (Exception ee) {}
+		System.err.format("%s \"%s\" %02x %02x : %02x %02x %d\n",
+			op, fcb.name, fcb.ext, fcb.cr, of.ext, of.cr, p);
+	}
+
 	private int readSeq(byte[] msgbuf, int start, int len) {
 		//byte u = msgbuf[start] & 0x1f;
 		cpmFcb fcb = new cpmFcb(msgbuf, fcbadr);
@@ -1932,8 +1948,9 @@ ee.printStackTrace();
 		int rc = 0;
 		try {
 			if ((fcb.ext == 0 && fcb.cr == 0) ||
-					fcb.cr != fcb.s1) {
-				long ln = fcb.cr;
+					fcb.ext != of.ext ||
+					fcb.cr != of.cr) {
+				long ln = fcb.cr & 0xff;
 				ln += fcb.ext * 128;
 				ln *= 128;
 				of.fd.seek(ln);
@@ -1960,6 +1977,9 @@ ee.printStackTrace();
 		}
 		++fcb.cr;
 		fcb.s1 = fcb.cr;
+		of.ext = fcb.ext;
+		of.cr = fcb.cr;
+		//traceFcb("rd", fcb, of);
 		fcb.putIO(msgbuf, fcbadr, false);
 		// fill any partial "sector" with Ctrl-Z, in case it's text.
 		Arrays.fill(msgbuf, dmaadr + rc, dmaadr + 128, (byte)0x1a);
@@ -1986,8 +2006,9 @@ ee.printStackTrace();
 		int rc = 0;
 		try {
 			if ((fcb.ext == 0 && fcb.cr == 0) ||
-					fcb.cr != fcb.s1) {
-				long ln = fcb.cr;
+					fcb.ext != of.ext ||
+					fcb.cr != of.cr) {
+				long ln = fcb.cr & 0xff;
 				ln += fcb.ext * 128;
 				ln *= 128;
 				of.fd.seek(ln);
@@ -2005,6 +2026,9 @@ ee.printStackTrace();
 		}
 		++fcb.cr;
 		fcb.s1 = fcb.cr;
+		of.ext = fcb.ext;
+		of.cr = fcb.cr;
+		//traceFcb("wr", fcb, of);
 		if ((fcb.rc & 0xff) < (fcb.cr & 0xff)) {
 			fcb.rc = fcb.cr;
 		}
