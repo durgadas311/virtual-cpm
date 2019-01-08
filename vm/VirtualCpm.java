@@ -822,6 +822,16 @@ public class VirtualCpm implements Computer, Runnable {
 	}
 
 	private void doCCP(String[] argv) {
+		boolean ok = false;
+		// Special case: "submit" file is directly referenced.
+		// TODO: make this more discriminating? */*? !pwd?
+		File f = new File(argv[0]);
+		if (f.exists()) {
+			ok = loadSUB(f, argv);
+			// nothing to run, yet...
+			running = false; // skip to next command
+			return;
+		}
 		String cmd = "";
 		cmd += (char)(mem[SCB_DRV] + 'A');
 		if (mem[SCB_USER] > 0) {
@@ -851,7 +861,6 @@ public class VirtualCpm implements Computer, Runnable {
 			cmd = cmd.substring(2);
 		}
 		File path = search(d, u, cmd);
-		boolean ok = false;
 		if (path.getName().endsWith(".sub")) {
 			ok = loadSUB(path, argv);
 			// nothing to run, yet...
@@ -1433,6 +1442,7 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 					if (!running) {
 						break;
 					}
+					PC = cpu.getRegPC();
 				}
 				clk = cpu.execute();
 //cpuDump(PC);
