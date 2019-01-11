@@ -644,23 +644,22 @@ ee.printStackTrace();
 		}
 	}
 
-	private void makeError(byte[] buf) {
-		ServerDispatch.putCode(buf,
-			ServerDispatch.getCode(buf) & 0xfe);
+	private void makeError(byte[] buf, int cd) {
+		ServerDispatch.putCode(buf, cd);
 		ServerDispatch.putBC(buf, 0);
 		ServerDispatch.putDE(buf, 1); // error ?
 	}
 
 	private byte[] doMagNet(byte[] msgbuf, int length) {
 		int code = ServerDispatch.getCode(msgbuf);
-		if (code == 0xd0) { // Token - status
+		if (code == 0x30) { // Token - status
 			// TODO: merge our own copy...
 			int ix = NetworkServer.mpayload + 1 +
 				HostFileBdos.cfgTab.id;
 			msgbuf[ix] = (byte)NetworkServer.tfileserver;
 			ServerDispatch.putBC(msgbuf, 0x1000 | HostFileBdos.cfgTab.id);
 			return msgbuf;
-		} else if (code == 0xb1) { // Boot
+		} else if (code == 0x20) { // Boot
 			// this gets tricky, we don't have room in msgbuf.
 			String file = String.format("%s/boot%02x.img", dir, clientId);
 			try {
@@ -670,18 +669,18 @@ ee.printStackTrace();
 				// Or... does file contain entire message header?
 				byte[] img = new byte[NetworkServer.mpayload + len];
 				boot.read(img, NetworkServer.mpayload, len);
-				ServerDispatch.putCode(img, 0xb0);
+				ServerDispatch.putCode(img, 0x10);
 				ServerDispatch.putBC(img, len);
 				ServerDispatch.putDE(img, 0);
 				ServerDispatch.putHL(img, adr);
 				return img;
 			} catch (Exception ee) {
-				makeError(msgbuf);
+				makeError(msgbuf, 0x28);
 				return msgbuf;
 			}
 		} else {
 			// TODO: this may not be correct...
-			makeError(msgbuf);
+			makeError(msgbuf, 0x38);
 			return msgbuf;
 		}
 	}
@@ -699,7 +698,7 @@ ee.printStackTrace();
 	}
 
 	public byte[] sendMsg(byte[] msgbuf, int len) {
-		if (ServerDispatch.getCode(msgbuf) != 0xc1) {
+		if (ServerDispatch.getCode(msgbuf) != 0x00) {
 			// MAGNet messages
 			return doMagNet(msgbuf, len);
 		}
@@ -729,7 +728,7 @@ ee.printStackTrace();
 		msgbuf[NetworkServer.mdid] = src;
 		msgbuf[NetworkServer.mcode] |= 1;
 		// fix-up MAGNet header for reply...
-		ServerDispatch.putCode(msgbuf, 0xc0);
+		ServerDispatch.putCode(msgbuf, 0x01);
 		ServerDispatch.putBC(msgbuf, lr + NetworkServer.mhdrlen);
 		ServerDispatch.putDE(msgbuf, 0);
 		ServerDispatch.putHL(msgbuf, 0);
