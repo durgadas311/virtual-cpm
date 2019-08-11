@@ -825,8 +825,13 @@ public class VirtualCpm implements Computer, Runnable {
 		boolean ok = false;
 		// Special case: "submit" file is directly referenced.
 		// TODO: make this more discriminating? */*? !pwd?
+		if (argv.length < 1) {
+			// silently ignore empty commands
+			// (especially don't throw ArrayIndexOutOfBoundsException)
+			return;
+		}
 		File f = new File(argv[0]);
-		if (f.exists()) {
+		if (argv[0].indexOf('/') >= 0 && f.exists()) {
 			ok = loadSUB(f, argv);
 			// nothing to run, yet...
 			running = false; // skip to next command
