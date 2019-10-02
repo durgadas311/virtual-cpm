@@ -438,6 +438,7 @@ public class HostFileBdos implements NetworkServer {
 	private cpmSfcb sFcb;
 	private cpmDpb curDpb;
 	private cpmSearch curSearch;
+	private boolean nosys;
 	private int curDsk;
 	private int curUsr;
 	private int curLogVec;
@@ -448,8 +449,8 @@ public class HostFileBdos implements NetworkServer {
 	private String fileName;
 	private String pathName;
 
-	// Includes MAGNet header...
-	static final int cpnMsg = NetworkServer.mstart;
+	// Start of CP/NET payload in buffer...
+	static final int cpnMsg = NetworkServer.DAT;
 	// These are only valid for the duration of bdosFunction()...
 	private int fcbadr;
 	private int dmaadr;
@@ -543,6 +544,8 @@ public class HostFileBdos implements NetworkServer {
 				// files can change without notice.
 				// But clients shouldn't be handling that.
 		String s = null;
+		s = props.getProperty(prefix + "_nosys");
+		nosys = (s != null);
 		// See if individual drive paths are specified...
 		for (int x = 0; x < 16; ++x) {
 			String p = String.format("%s_drive_%c", prefix, (char)('a' + x));
@@ -644,47 +647,6 @@ ee.printStackTrace();
 		}
 	}
 
-	private void makeError(byte[] buf, int cd) {
-		ServerDispatch.putCode(buf, cd);
-		ServerDispatch.putBC(buf, 0);
-		ServerDispatch.putDE(buf, 1); // error ?
-	}
-
-	private byte[] doMagNet(byte[] msgbuf, int length) {
-		int code = ServerDispatch.getCode(msgbuf);
-		if (code == 0x30) { // Token - status
-			// TODO: merge our own copy...
-			int ix = NetworkServer.mpayload + 1 +
-				HostFileBdos.cfgTab.id;
-			msgbuf[ix] = (byte)NetworkServer.tfileserver;
-			ServerDispatch.putBC(msgbuf, 0x1000 | HostFileBdos.cfgTab.id);
-			return msgbuf;
-		} else if (code == 0x20) { // Boot
-			// this gets tricky, we don't have room in msgbuf.
-			String file = String.format("%s/boot%02x.img", dir, clientId);
-			try {
-				FileInputStream boot = new FileInputStream(file);
-				int len = (int)boot.getChannel().size();
-				int adr = 0x3000; // TODO: how to get?
-				// Or... does file contain entire message header?
-				byte[] img = new byte[NetworkServer.mpayload + len];
-				boot.read(img, NetworkServer.mpayload, len);
-				ServerDispatch.putCode(img, 0x10);
-				ServerDispatch.putBC(img, len);
-				ServerDispatch.putDE(img, 0);
-				ServerDispatch.putHL(img, adr);
-				return img;
-			} catch (Exception ee) {
-				makeError(msgbuf, 0x28);
-				return msgbuf;
-			}
-		} else {
-			// TODO: this may not be correct...
-			makeError(msgbuf, 0x38);
-			return msgbuf;
-		}
-	}
-
 	public byte[] checkRecvMsg(byte clientId) {
 		// For HostFileBdos, this is never used.
 		// The response was posted from sendMsg().
@@ -697,12 +659,9 @@ ee.printStackTrace();
 		return bdosFunction(fnc, mem, param, len);
 	}
 
+	// msgbuf[0] is CP/NET FMT byte...
 	public byte[] sendMsg(byte[] msgbuf, int len) {
-		if (ServerDispatch.getCode(msgbuf) != 0x00) {
-			// MAGNet messages
-			return doMagNet(msgbuf, len);
-		}
-		int fnc = msgbuf[NetworkServer.mfunc] & 0xff;
+		int fnc = msgbuf[NetworkServer.FNC] & 0xff;
 		//dumpMsg(true, msgbuf, len);
 		fcbadr = cpnMsg + 1;
 		if (fnc == 17) {
@@ -712,8 +671,6 @@ ee.printStackTrace();
 		int lr = -1;
 		if (fnc == 64 || chkClient(clientId)) {
 			lr = bdosFunction(fnc, msgbuf, cpnMsg, len);
-		} else {
-			lr = -1;
 		}
 		//dumpMsg(false, msgbuf, lr);
 		if (lr <= 0) {
@@ -722,16 +679,11 @@ ee.printStackTrace();
 			lr = 2;
 		}
 		// fix up CP/NET message header for reply...
-		msgbuf[NetworkServer.msize] = (byte)(lr - 1);
-		byte src = msgbuf[NetworkServer.msid];
-		msgbuf[NetworkServer.msid] = msgbuf[NetworkServer.mdid];
-		msgbuf[NetworkServer.mdid] = src;
-		msgbuf[NetworkServer.mcode] |= 1;
-		// fix-up MAGNet header for reply...
-		ServerDispatch.putCode(msgbuf, 0x01);
-		ServerDispatch.putBC(msgbuf, lr + NetworkServer.mhdrlen);
-		ServerDispatch.putDE(msgbuf, 0);
-		ServerDispatch.putHL(msgbuf, 0);
+		msgbuf[NetworkServer.SIZ] = (byte)(lr - 1);
+		byte src = msgbuf[NetworkServer.SID];
+		msgbuf[NetworkServer.SID] = msgbuf[NetworkServer.DID];
+		msgbuf[NetworkServer.DID] = src;
+		msgbuf[NetworkServer.FMT] |= 1;
 		return msgbuf;
 	}
 
@@ -904,9 +856,9 @@ ee.printStackTrace();
 	// Debug only.
 	private void dumpMsg(boolean send, byte[] msgbuf, int n) {
 		// For send use msize + 1, else use 'n'...
-		int fnc = msgbuf[NetworkServer.mfunc];
+		int fnc = msgbuf[NetworkServer.FNC];
 		int msg = cpnMsg;
-		int len = send ? (msgbuf[NetworkServer.msize] & 0xff) + 1 : n;
+		int len = send ? (msgbuf[NetworkServer.SIZ] & 0xff) + 1 : n;
 		if (!send && (fnc == 17 || fnc == 18)) {
 			if (len < 32) {
 				System.err.format("dirent %d\n", msgbuf[msg]);
@@ -1284,7 +1236,7 @@ ee.printStackTrace();
 		}
 		search.bc = (byte)(fi.length() & 0x7f);
 		search.rw = fi.canWrite();
-		search.ex = fi.canExecute();
+		search.ex = (!nosys && fi.canExecute());
 		if (search.full && search.cpm3) {
 			// SFCB timestamps are only used if the
 			// matching FCB is for extent 0. However,
@@ -1513,7 +1465,7 @@ ee.printStackTrace();
 			flags = "r";
 			pathName = cpmPath(d, 0, fileName);
 			fi = new File(pathName);
-			if (!fi.canExecute()) { // no "SYS" attribute
+			if (!nosys && !fi.canExecute()) { // no "SYS" attribute
 				return -1;
 			}
 		}
@@ -1554,7 +1506,7 @@ ee.printStackTrace();
 		if (usr0) {
 			fcb.SET_USR0();
 		}
-		if (fi.canExecute()) {
+		if (!nosys && fi.canExecute()) {
 			fcb.SET_SYS();
 		}
 		if (!fi.canWrite()) {
@@ -2263,9 +2215,9 @@ ee.printStackTrace();
 			}
 		}
 		boolean err = false;
-		boolean sys = fi.canExecute();
+		boolean sys = (!nosys && fi.canExecute());
 		boolean nsys = fcb.ATTR_SYS();
-		if (nsys != sys) {
+		if (nsys != sys && !nosys) {
 			if (!fi.setExecutable(nsys)) {
 				err = true;
 			}

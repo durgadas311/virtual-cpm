@@ -36,7 +36,6 @@ public class ServerDispatch {
 		nodes[cid] = true;
 		prefix += "server";
 		int pflen = prefix.length();
-		CpnetSocketClient ssrv = null;
 		for (String prop : props.stringPropertyNames()) {
 			// property syntax: cpnetdevice_server## = ClassId [args...]
 			// where '##' is serverId in hex.
@@ -159,8 +158,9 @@ public class ServerDispatch {
 
 		if (nws == null) {
 			System.err.format("Attempted send to null server %02x\n", did);
-			putCode(msgbuf, 0xd6);
-			putBC(msgbuf, 1);
+			putCode(msgbuf, 0x38);
+			putBC(msgbuf, 0);
+			putDE(msgbuf, 1);
 			return msgbuf;
 		}
 		//System.err.format("Message: %02x %02x %02x %02x %02x %02x %02x : %02x\n",

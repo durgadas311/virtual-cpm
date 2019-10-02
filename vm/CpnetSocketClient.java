@@ -87,16 +87,20 @@ public class CpnetSocketClient implements NetworkServer, Runnable {
 
 	private byte[] makeError(byte[] msgbuf, int len) {
 		if (isCpnet(msgbuf)) {
+			len = 2;
+			ServerDispatch.putCode(msgbuf, 0x01);
+			ServerDispatch.putBC(msgbuf, len + NetworkServer.mhdrlen);
 			msgbuf[NetworkServer.mstart] = (byte)0xff;
 			msgbuf[NetworkServer.mstart + 1] = (byte)0x0c;
-			msgbuf[NetworkServer.msize] = 2 - 1;
+			msgbuf[NetworkServer.msize] = (byte)(len - 1);
 			msgbuf[NetworkServer.mcode] |= 1;
 			byte src = msgbuf[NetworkServer.msid];
 			msgbuf[NetworkServer.msid] = msgbuf[NetworkServer.mdid];
 			msgbuf[NetworkServer.mdid] = src;
 		} else {
-			msgbuf[NetworkServer.mcode] = (byte)0xd6;
-			msgbuf[NetworkServer.mBC] = (byte)1;
+			ServerDispatch.putCode(msgbuf, 0x38);
+			ServerDispatch.putBC(msgbuf, 0);
+			ServerDispatch.putDE(msgbuf, 1);
 		}
 		return msgbuf;
 	}
@@ -131,8 +135,12 @@ public class CpnetSocketClient implements NetworkServer, Runnable {
 			return makeError(msgbuf, len);
 		}
 		try {
+			int cd = ServerDispatch.getCode(msgbuf);
+			// Mark message as "MAGnet format"
+			ServerDispatch.putCode(msgbuf, cd | 0x80);
 			out.write(msgbuf, 0, len);
 			out.flush();
+			ServerDispatch.putCode(msgbuf, cd);
 		} catch (Exception ee) {
 			// socket is dead? start connection over?
 			// The thread should always notice this before we can,
@@ -153,11 +161,11 @@ public class CpnetSocketClient implements NetworkServer, Runnable {
 			int cd = ServerDispatch.getCode(respBuf);
 			buflen = NetworkServer.mpayload +
 				ServerDispatch.getBC(respBuf);
-			if (cd == 0xb0) { // the only problem case
+			if (cd == 0x10) { // the only problem case
 				byte[] nb = new byte[buflen];
 				System.arraycopy(respBuf, 0, nb, 0, bufoff);
 				respBuf = nb;
-			} else if (cd == 0xd0) { // the only exception
+			} else if (cd == 0x30) { // the only exception
 				buflen = NetworkServer.mpayload + 65;
 			}
 		}

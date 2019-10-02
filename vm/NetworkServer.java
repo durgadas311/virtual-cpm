@@ -56,12 +56,18 @@ public interface NetworkServer {
 	public static final int tcdos = 0xb0;
 
 	// CP/NET message format
-	public static final int mcode  = mpayload + 0; // CP/Net msg code in buffer
-	public static final int mdid   = mpayload + 1; // CP/Net DID in buffer
-	public static final int msid   = mpayload + 2; // CP/Net SID in buffer
-	public static final int mfunc  = mpayload + 3; // CP/Net function code in buffer
-	public static final int msize  = mpayload + 4; // CP/Net msg size in buffer
 	public static final int mhdrlen = 5;
+	public static final int FMT = 0; // CP/Net msg code in buffer
+	public static final int DID = 1; // CP/Net DID in buffer
+	public static final int SID = 2; // CP/Net SID in buffer
+	public static final int FNC = 3; // CP/Net function code in buffer
+	public static final int SIZ = 4; // CP/Net msg size in buffer
+	public static final int DAT = mhdrlen; // CP/Net payload
+	public static final int mcode  = mpayload + FMT;
+	public static final int mdid   = mpayload + DID;
+	public static final int msid   = mpayload + SID;
+	public static final int mfunc  = mpayload + FNC;
+	public static final int msize  = mpayload + SIZ;
 	public static final int mstart = mpayload + mhdrlen; // CP/Net msg start in buffer
 
 	byte[] checkRecvMsg(byte clientId);
