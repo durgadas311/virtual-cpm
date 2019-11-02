@@ -18,53 +18,54 @@ public class VirtualCpm implements Computer, Runnable {
 	static final int passUSR = 0x04;
 	static final int passDRV = 0x08;
 	static final int useMSC = 0x10;
+	static final int passFCB = 0x20;
 
 	private byte[] flags = {
-		(byte)passUSR,		// 15 - OPEN
-		(byte)passUSR,		// 16 - CLOSE
-		(byte)passDRV,		// 17 - SEARCH FIRST
-		(byte)0,		// 18 - SEARCH NEXT
-		(byte)passUSR,		// 19 - DELETE
-		(byte)(passUSR|useMSC),	// 20 - READ SEQ
-		(byte)(passUSR|useMSC),	// 21 - WRITE SEQ
-		(byte)passUSR,		// 22 - MAKE
-		(byte)passUSR,		// 23 - RENAME
-		(byte)0,		// 24 - GET LOGIN VEC
-		(byte)0,		// 25 - N/A
-		(byte)0,		// 26 - N/A
-		(byte)passDRV,		// 27 - GET ALLOC VEC
-		(byte)passDRV,		// 28 - SET R/O
-		(byte)0,		// 29 - GET R/O VEC
-		(byte)passUSR,		// 30 - SET ATTR
-		(byte)passDRV,		// 31 - GET DPB
-		(byte)0,		// 32 - N/A
-		(byte)(passUSR|useMSC),	// 33 - READ RND
-		(byte)(passUSR|useMSC),	// 34 - WRITE RND
-		(byte)passUSR,		// 35 - COMP SIZE
-		(byte)passUSR,		// 36 - SET RND REC
-		(byte)passDE,		// 37 - RESET DRIVES
-		(byte)passDE,		// 38 - ACCESS DRIVES
-		(byte)passDE,		// 39 - FREE DRIVES
-		(byte)(passUSR|useMSC),	// 40 - WRITE RND ZF
-		(byte)0,		// 41 - N/A
-		(byte)passUSR,		// 42 - LOCK REC
-		(byte)passUSR,		// 43 - UNLOCK REC
-		(byte)0,		// 44 - N/A
-		(byte)0,		// 45 - N/A
-		(byte)passE,		// 46 - GET FREE SPACE
-		(byte)0,		// 47 - N/A
-		(byte)passE,		// 48 - FLUSH BUFFERS
+		(byte)(passUSR|passFCB),		// 15 - OPEN
+		(byte)(passUSR|passFCB),		// 16 - CLOSE
+		(byte)(passDRV|passFCB),		// 17 - SEARCH FIRST
+		(byte)0,				// 18 - SEARCH NEXT
+		(byte)(passUSR|passFCB),		// 19 - DELETE
+		(byte)(passUSR|passFCB|useMSC),		// 20 - READ SEQ
+		(byte)(passUSR|passFCB|useMSC),		// 21 - WRITE SEQ
+		(byte)(passUSR|passFCB),		// 22 - MAKE
+		(byte)(passUSR|passFCB),		// 23 - RENAME
+		(byte)0,				// 24 - GET LOGIN VEC
+		(byte)0,				// 25 - N/A
+		(byte)0,				// 26 - N/A
+		(byte)passDRV,				// 27 - GET ALLOC VEC
+		(byte)passDRV,				// 28 - SET R/O
+		(byte)0,				// 29 - GET R/O VEC
+		(byte)(passUSR|passFCB),		// 30 - SET ATTR
+		(byte)passDRV,				// 31 - GET DPB
+		(byte)0,				// 32 - N/A
+		(byte)(passUSR|passFCB|useMSC),		// 33 - READ RND
+		(byte)(passUSR|passFCB|useMSC),		// 34 - WRITE RND
+		(byte)(passUSR|passFCB),		// 35 - COMP SIZE
+		(byte)(passUSR|passFCB),		// 36 - SET RND REC
+		(byte)passDE,				// 37 - RESET DRIVES
+		(byte)passDE,				// 38 - ACCESS DRIVES
+		(byte)passDE,				// 39 - FREE DRIVES
+		(byte)(passUSR|passFCB|useMSC),		// 40 - WRITE RND ZF
+		(byte)0,				// 41 - N/A
+		(byte)(passUSR|passFCB),		// 42 - LOCK REC
+		(byte)(passUSR|passFCB),		// 43 - UNLOCK REC
+		(byte)0,				// 44 - N/A
+		(byte)0,				// 45 - N/A
+		(byte)passE,				// 46 - GET FREE SPACE
+		(byte)0,				// 47 - N/A
+		(byte)passE,				// 48 - FLUSH BUFFERS
 	};
 	private byte[] flag3 = {
-		(byte)0,		// 98 - FREE BLOCKS
-		(byte)passUSR,		// 99 - TRUNC FILE
-		(byte)-1,		// 100 - SET DIR LABEL *
-		(byte)0,		// 101 - GET DIR LABEL
-		(byte)passUSR,		// 102 - GET FILE STAMPS
-		(byte)-1,		// 103 - WRITE XFCB *
-		(byte)-1,		// 104 - SET DATE/TIME *
-		(byte)0,		// 105 - GET DATE/TIME
-		(byte)0,		// 106 - SET DEF PASSWORD
+		(byte)0,			// 98 - FREE BLOCKS
+		(byte)(passUSR|passFCB),	// 99 - TRUNC FILE
+		(byte)-1,			// 100 - SET DIR LABEL *
+		(byte)0,			// 101 - GET DIR LABEL
+		(byte)(passUSR|passFCB),	// 102 - GET FILE STAMPS
+		(byte)-1,			// 103 - WRITE XFCB *
+		(byte)-1,			// 104 - SET DATE/TIME *
+		(byte)0,			// 105 - GET DATE/TIME
+		(byte)0,			// 106 - SET DEF PASSWORD
 	};
 	static String fdelim = " \t\r\000;=<>.:,|[]";
 
@@ -588,7 +589,7 @@ public class VirtualCpm implements Computer, Runnable {
 			}
 		}
 		mem[alvbf] = mem[SCB_USER];
-		int rsp = hfb.bdosCall(19, mem, alvbf, 1, fcb1, defdma);
+		int rsp = hfb.bdosCall(19, mem, alvbf, 37, fcb1, defdma);
 		int ent = mem[alvbf] & 0xff;
 		if (ent > 3) { // assume FF
 			// TODO: specific failure?
@@ -1156,6 +1157,9 @@ public class VirtualCpm implements Computer, Runnable {
 			mem[param] = mem[SCB_USER];
 		} else if ((flg & passDRV) != 0) {
 			mem[param] = mem[SCB_DRV];
+		}
+		if ((flg & passFCB) != 0) {
+			len += 36;
 		}
 		int rsp;
 		if ((flg & useMSC) != 0) {

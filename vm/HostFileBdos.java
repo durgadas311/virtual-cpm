@@ -656,23 +656,31 @@ ee.printStackTrace();
 	public int bdosCall(int fnc, byte[] mem, int param, int len, int fcb, int dma) {
 		fcbadr = fcb;
 		dmaadr = dma;
-		return bdosFunction(fnc, mem, param, len);
+		//dumpMsg(true, fnc, mem, param, len);
+		int n = bdosFunction(fnc, mem, param, len);
+		//dumpMsg(false, fnc, mem, param, n);
+		return n;
 	}
 
 	// msgbuf[0] is CP/NET FMT byte...
 	public byte[] sendMsg(byte[] msgbuf, int len) {
 		int fnc = msgbuf[NetworkServer.FNC] & 0xff;
-		//dumpMsg(true, msgbuf, len);
+		int n = (msgbuf[NetworkServer.SIZ] & 0xff) + 1;
 		fcbadr = cpnMsg + 1;
 		if (fnc == 17) {
 			fcbadr += 1;
 		}
-		dmaadr = cpnMsg + 37;
+		if (fnc == 17 || fnc == 18) {
+			dmaadr = cpnMsg + 1; // for result, only.
+		} else {
+			dmaadr = fcbadr + 36;
+		}
+		//dumpMsg(true, fnc, msgbuf, cpnMsg, n);
 		int lr = -1;
 		if (fnc == 64 || chkClient(clientId)) {
 			lr = bdosFunction(fnc, msgbuf, cpnMsg, len);
 		}
-		//dumpMsg(false, msgbuf, lr);
+		//dumpMsg(false, fnc, msgbuf, cpnMsg, lr);
 		if (lr <= 0) {
 			msgbuf[cpnMsg] = (byte)0xff;
 			msgbuf[cpnMsg + 1] = (byte)12;
@@ -854,18 +862,14 @@ ee.printStackTrace();
 	}
 
 	// Debug only.
-	private void dumpMsg(boolean send, byte[] msgbuf, int n) {
-		// For send use msize + 1, else use 'n'...
-		int fnc = msgbuf[NetworkServer.FNC];
-		int msg = cpnMsg;
-		int len = send ? (msgbuf[NetworkServer.SIZ] & 0xff) + 1 : n;
+	private void dumpMsg(boolean send, int fnc, byte[] msgbuf, int msg, int len) {
 		if (!send && (fnc == 17 || fnc == 18)) {
 			if (len < 32) {
 				System.err.format("dirent %d\n", msgbuf[msg]);
 				return;
 			}
 			int x = 0;
-			int dir = msg + 1;
+			int dir = dmaadr;
 			while (len > 32) {
 				if (msgbuf[dir] == 0x21) {
 					System.err.format("dirent %d " +
@@ -912,21 +916,21 @@ ee.printStackTrace();
 			return;
 		}
 		if (fnc == 17) { // must be send
-			cpmDirf fcb = new cpmDirf(msgbuf, msg + 2);
+			cpmDirf fcb = new cpmDirf(msgbuf, fcbadr);
 			System.err.format("MSG %02x: %d: %02x %02x " +
 				"%02x \"%s\" %02x %02x %02x %02x ...\n",
-				fnc, len, msgbuf[cpnMsg] & 0xff, msgbuf[cpnMsg + 1] & 0xff,
+				fnc, len, msgbuf[msg] & 0xff, msgbuf[msg + 1] & 0xff,
 				fcb.drv, fcb.name,
 				fcb.ext, fcb.s1, fcb.s2, fcb.rc);
 			return;
 		}
 		if (len > 30) { // must have FCB
-			cpmFcb fcb = new cpmFcb(msgbuf, msg + 1);
+			cpmFcb fcb = new cpmFcb(msgbuf, fcbadr);
 			System.err.format("MSG %02x: %d: %02x " +
 				"%02x \"%s\" %02x %02x %02x %02x " +
 				"%04x %04x " +
 				"... %02x %06x\n",
-				fnc, len, msgbuf[cpnMsg] & 0xff,
+				fnc, len, msgbuf[msg] & 0xff,
 				fcb.drv & 0xff, fcb.name,
 				fcb.ext & 0xff, fcb.s1 & 0xff, fcb.s2 & 0xff, fcb.rc & 0xff,
 				fcb.fd, fcb.fd_,
@@ -934,7 +938,7 @@ ee.printStackTrace();
 			return;
 		}
 		System.err.format("MSG %02x: %d: %02x %02x [...]\n",
-			fnc, len, msgbuf[cpnMsg] & 0xff, msgbuf[cpnMsg + 1] & 0xff);
+			fnc, len, msgbuf[msg] & 0xff, msgbuf[msg + 1] & 0xff);
 	}
 
 	String cpmDrive(int drive) {
@@ -2167,11 +2171,7 @@ ee.printStackTrace();
 		} else {
 			r = (r + 127) / 128;
 		}
-		msgbuf[fcbadr + 33] = (byte)(r & 0x0ff);
-		r >>= 8;
-		msgbuf[fcbadr + 34] = (byte)(r & 0x0ff);
-		r >>= 8;
-		msgbuf[fcbadr + 35] = (byte)(r & 0x003);
+		fcb.rr = (int)r;
 		fcb.putIO(msgbuf, fcbadr, true);
 		return 37;
 	}
