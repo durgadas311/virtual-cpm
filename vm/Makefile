@@ -37,4 +37,7 @@ vcpm.tgz: __FRC__
 		vm/LICENSE vm/README vm/INSTALL \
 		vm/*.java
 
+ship:
+	rsync -Wuv VirtualCpm.jar ~/git/MmsCpm3/tools/vcpm
+
 __FRC__:
