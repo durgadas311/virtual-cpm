@@ -853,6 +853,7 @@ ee.printStackTrace();
 	}
 
 	public void shutdown() {
+		closeAll(0xffff);
 		for (int x = 0; x < lstCid.length; ++x) {
 			if (lstCid[x] == clientId) {
 				releaseLst(clientId, x);
