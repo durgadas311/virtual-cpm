@@ -1386,13 +1386,15 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 
 	private void cpuDump(int pc) {
 		System.err.format("%04x: %02x %02x %02x %02x : " +
-				"%02x %04x %04x %04x [%04x] %s\n",
+				"%02x %04x %04x %04x|%04x %04x [%04x] %s\n",
 			pc,
 			mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3],
 			cpu.getRegA(),
 			cpu.getRegBC(),
 			cpu.getRegDE(),
 			cpu.getRegHL(),
+			cpu.getRegIX(),
+			cpu.getRegIY(),
 			cpu.getRegSP(),
 			disas.disas(pc)
 			);

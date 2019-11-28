@@ -558,7 +558,7 @@ public class Z80DisassemblerMAC80 implements Z80Disassembler {
 				--lastLen;
 				break;
 			case 0x46:       /* LD B,(IX+d) */
-				instr = String.format("mov%c b,%d", regIXY, disp);
+				instr = String.format("ld%c b,%d", regIXY, disp);
 				break;
 			case 0x4C:       /* LD C,IXh */
 				instr = String.format("mov%c c,h", regIXY);
@@ -569,7 +569,7 @@ public class Z80DisassemblerMAC80 implements Z80Disassembler {
 				--lastLen;
 				break;
 			case 0x4E:       /* LD C,(IX+d) */
-				instr = String.format("mov%c c,%d", regIXY, disp);
+				instr = String.format("ld%c c,%d", regIXY, disp);
 				break;
 			case 0x54:       /* LD D,IXh */
 				instr = String.format("mov%c d,h", regIXY);
@@ -580,7 +580,7 @@ public class Z80DisassemblerMAC80 implements Z80Disassembler {
 				--lastLen;
 				break;
 			case 0x56:       /* LD D,(IX+d) */
-				instr = String.format("mov%c d,%d", regIXY, disp);
+				instr = String.format("ld%c d,%d", regIXY, disp);
 				break;
 			case 0x5C:       /* LD E,IXh */
 				instr = String.format("mov%c e,h", regIXY);
@@ -591,7 +591,7 @@ public class Z80DisassemblerMAC80 implements Z80Disassembler {
 				--lastLen;
 				break;
 			case 0x5E:       /* LD E,(IX+d) */
-				instr = String.format("mov%c e,%d", regIXY, disp);
+				instr = String.format("ld%c e,%d", regIXY, disp);
 				break;
 			case 0x60:       /* LD IXh,B */
 				instr = String.format("mov%c h,b", regIXY);
@@ -618,7 +618,7 @@ public class Z80DisassemblerMAC80 implements Z80Disassembler {
 				--lastLen;
 				break;
 			case 0x66:       /* LD H,(IX+d) */
-				instr = String.format("mov%c h,%d", regIXY, disp);
+				instr = String.format("ld%c h,%d", regIXY, disp);
 				break;
 			case 0x67:       /* LD IXh,A */
 				instr = String.format("mov%c h,a", regIXY);
@@ -649,32 +649,32 @@ public class Z80DisassemblerMAC80 implements Z80Disassembler {
 				--lastLen;
 				break;
 			case 0x6E:       /* LD L,(IX+d) */
-				instr = String.format("mov%c l,%d", regIXY, disp);
+				instr = String.format("ld%c l,%d", regIXY, disp);
 				break;
 			case 0x6F:       /* LD IXl,A */
 				instr = String.format("mov%c l,a", regIXY);
 				--lastLen;
 				break;
 			case 0x70:       /* LD (IX+d),B */
-				instr = String.format("mov%c %d,b", regIXY, disp);
+				instr = String.format("st%c b,%d", regIXY, disp);
 				break;
 			case 0x71:       /* LD (IX+d),C */
-				instr = String.format("mov%c %d,c", regIXY, disp);
+				instr = String.format("st%c c,%d", regIXY, disp);
 				break;
 			case 0x72:       /* LD (IX+d),D */
-				instr = String.format("mov%c %d,d", regIXY, disp);
+				instr = String.format("st%c d,%d", regIXY, disp);
 				break;
 			case 0x73:       /* LD (IX+d),E */
-				instr = String.format("mov%c %d,e", regIXY, disp);
+				instr = String.format("st%c e,%d", regIXY, disp);
 				break;
 			case 0x74:       /* LD (IX+d),H */
-				instr = String.format("mov%c %d,h", regIXY, disp);
+				instr = String.format("st%c h,%d", regIXY, disp);
 				break;
 			case 0x75:       /* LD (IX+d),L */
-				instr = String.format("mov%c %d,l", regIXY, disp);
+				instr = String.format("st%c l,%d", regIXY, disp);
 				break;
 			case 0x77:       /* LD (IX+d),A */
-				instr = String.format("mov%c %d,a", regIXY, disp);
+				instr = String.format("st%c a,%d", regIXY, disp);
 				break;
 			case 0x7C:       /* LD A,IXh */
 				instr = String.format("mov%c a,h", regIXY);
@@ -685,7 +685,7 @@ public class Z80DisassemblerMAC80 implements Z80Disassembler {
 				--lastLen;
 				break;
 			case 0x7E:       /* LD A,(IX+d) */
-				instr = String.format("mov%c a,%d", regIXY, disp);
+				instr = String.format("ld%c a,%d", regIXY, disp);
 				break;
 			case 0x84:       /* ADD A,IXh */
 				instr = String.format("add%c h", regIXY);
@@ -974,11 +974,11 @@ public class Z80DisassemblerMAC80 implements Z80Disassembler {
 			case 0x6F:       /* RLD */
 				instr = "rld";
 				break;
-			case 0x70:       /* IN (C) */
-				instr = "inz";
+			case 0x70:       /* IN F,(C) */
+				instr = "inf";
 				break;
-			case 0x71:       /* OUT (C),0 */
-				instr = "outz";
+			case 0x71:       /* OUT (C),F */
+				instr = "outf";
 				break;
 			case 0x72:       /* SBC HL,SP */
 				instr = "dsbc sp";
