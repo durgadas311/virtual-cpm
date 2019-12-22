@@ -116,6 +116,7 @@ public class VirtualCpm implements Computer, Runnable {
 	static final int SCB_DATE = scb + 0x58; // date,hours,min,sec
 
 	private static VirtualCpm vcpm;
+	private static boolean coredump;
 
 	public static void main(String[] argv) {
 		Properties props = new Properties();
@@ -154,6 +155,8 @@ public class VirtualCpm implements Computer, Runnable {
 			String p = String.format("vcpm_drive_%c", (char)('a' + x));
 			props.setProperty(p, s.trim());
 		}
+		s = System.getenv("VCPMCoreDump");
+		coredump = (s != null);
 		s = System.getenv("CPMDefault");
 		if (s == null) {
 			s = "0A:";
@@ -1459,7 +1462,7 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 //cpuDump(PC);
 			}
 		}
-//coreDump();
+		if (coredump) coreDump();
 		stopped = true;
 		stopWait.release();
 	}
