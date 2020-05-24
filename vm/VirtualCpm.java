@@ -176,9 +176,8 @@ public class VirtualCpm implements Computer, Runnable {
 		mem = new byte[65536];
 		disas = new Z80DisassemblerMAC80(mem);
 		lin = new BufferedReader(new InputStreamReader(System.in));
-		HostFileBdos.initCfg('P', (byte)0x00, 1, null);
-		HostFileBdos.initLsts(props, "vcpm");
-		hfb = new HostFileBdos(props, "vcpm", new Vector<String>(), 0xfe);
+		CpnetServer srv = new CpnetServer(props, "vcpm", 'P', (byte)0x00, 1, null);
+		hfb = new HostFileBdos(props, "vcpm", new Vector<String>(), 0xfe, srv);
 		mem[alvbf] = (byte)0b10000000; // COMPAT_PRO - don't lock files
 		hfb.bdosCall(70, mem, alvbf, 1, fcb1, defdma);
 		cmds.add(argv);

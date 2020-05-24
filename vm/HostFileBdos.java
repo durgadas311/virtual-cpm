@@ -11,7 +11,6 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.Files;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
-import java.lang.reflect.Constructor;
 import java.util.Properties;
 
 public class HostFileBdos implements NetworkServer {
@@ -462,58 +461,12 @@ public class HostFileBdos implements NetworkServer {
 	static final int EACCES = 6;
 	static final int EAGAIN = 9;
 
-	// The reason for 'static' is so that multiple instances (clients)
-	// of HostFileBdos may exist, but all use a common server config.
-	static final CpnetServerConfig cfgTab = new CpnetServerConfig();
-	public static void initCfg(char tmp, byte sid, int max, String dir) {
-		HostFileBdos.cfgTab.tmp = (byte)((tmp - 'A') & 0x0f);
-		HostFileBdos.cfgTab.sts = (byte)0b00010000; // "ready"
-		HostFileBdos.cfgTab.id = sid;
-		HostFileBdos.cfgTab.max = (byte)max;
-		HostFileBdos.dir = dir;
-	}
-
-	public static void initLsts(Properties props, String prefix) {
-		String pfx = prefix;
-		String s;
-		pfx += "_lst";
-		int pflen = pfx.length();
-		// Could have up to 16 printers assigned...
-		for (String prop : props.stringPropertyNames()) {
-			if (prop.startsWith(pfx)) {
-				s = props.getProperty(prop); // can't be null
-				int lid;
-				try {
-					lid = Integer.valueOf(prop.substring(pflen), 16);
-				} catch (Exception ee) {
-					System.err.format("Invalid List ID, skipping %s\n", s);
-					continue;
-				}
-				if (lid < 0 || lid >= 16) {
-					System.err.format("Invalid List ID %01lx: skipping %s\n", lid, s);
-					continue;
-				}
-				if (s.length() == 0) {
-					System.err.format("Empty List property %s\n", prop);
-					continue;
-				}
-				System.err.format("List %01x: %s\n", lid, s);
-				initLst(props, lid, s);
-			}
-		}
-	}
-
-	static final OutputStream[] lsts = new OutputStream[16];
-	static final int[] lstCid = new int[16];
-	static String dir = null;
-	static String[] dirs = new String[16];
-	static {
-		Arrays.fill(lsts, null);
-		Arrays.fill(lstCid, 0xff);
-	}
+	protected CpnetServer srv;
 
 	// args: "HostFileBdos" [root-dir [tmp-drv]]
-	public HostFileBdos(Properties props, String prefix, Vector<String> args, int cltId) {
+	public HostFileBdos(Properties props, String prefix, Vector<String> args,
+			int cltId, CpnetServer srv) {
+		this.srv = srv;
 		clientId = cltId;
 		curDsk = -1;
 		curUsr = 0;
@@ -546,30 +499,8 @@ public class HostFileBdos implements NetworkServer {
 		String s = null;
 		s = props.getProperty(prefix + "_nosys");
 		nosys = (s != null);
-		// See if individual drive paths are specified...
-		for (int x = 0; x < 16; ++x) {
-			String p = String.format("%s_drive_%c", prefix, (char)('a' + x));
-			s = props.getProperty(p);
-			if (s == null || s.length() == 0) {
-				continue;
-			}
-//System.err.format("%c: = %s\n", (char)('A' + x), s);
-			File f = new File(s);
-			if (!f.exists()) {
-				try {
-					f.mkdirs();
-				} catch (Exception ee) {}
-			}
-			if (!f.exists() || !f.isDirectory()) {
-				System.err.format("HostFileBdos invalid path in %s: %s\n",
-						p, s);
-				continue;
-			}
-			// dirs[x] is never not null unless the dir exists.
-			dirs[x] = s;
-		}
 		// login this client - unless we wait for LOGIN message with PASSWORD...
-		if (!addClient(clientId)) {
+		if (!srv.addClient(clientId)) {
 			// TODO: need to return error and disable this instance...
 			// Or, let LOGON fail later?
 		}
@@ -577,8 +508,8 @@ public class HostFileBdos implements NetworkServer {
 		// args[0] is our class name, like argv[0] in main().
 
 		// In multi-client environment, temp drive is set only by server init.
-		if (HostFileBdos.cfgTab.max == 1) {
-			if (dir == null) {
+		if (srv.cfgTab.max == 1) {
+			if (srv.dir == null) {
 				if (args.size() > 1) {
 					s = args.get(1);
 				} else {
@@ -589,63 +520,24 @@ public class HostFileBdos implements NetworkServer {
 				if (s == null) {
 					s = System.getProperty("user.home") + "/HostFileBdos";
 				}
-				dir = s;
+				srv.dir = s;
 			}
 			if (args.size() > 2) {
 				s = args.get(2);
-				if (s.length() == 2 && Character.isLetter(s.charAt(0)) && s.charAt(1) == ':') {
-					HostFileBdos.cfgTab.tmp = (byte)((Character.toUpperCase(s.charAt(0)) - 'A') - 0x0f);
+				if (s.length() == 2 && Character.isLetter(s.charAt(0)) &&
+						s.charAt(1) == ':') {
+					srv.cfgTab.tmp = (byte)((Character.toUpperCase(
+									s.charAt(0)) - 'A') - 0x0f);
 				}
 			}
 		}
 		boolean silent = (props.getProperty("silent") != null);
 		if (!silent) {
-			System.err.format("Creating HostFileBdos %02x device " +
-						"with root dir %s\n",
-						HostFileBdos.cfgTab.id, dir);
+			System.err.format("Creating HostFileBdos %02x device with root dir %s\n",
+						srv.cfgTab.id, srv.dir);
 		}
 	}
 
-	private static void initLst(Properties props, int lid, String s) {
-		if (s.charAt(0) == '>') { // redirect to file
-			attachFile(lid, s.substring(1));
-		} else if (s.charAt(0) == '|') { // pipe to program
-			attachPipe(lid, s.substring(1));
-		} else {
-			attachClass(props, lid, s);
-		}
-	}
-
-	private static void attachFile(int lid, String s) {
-		// TODO: allow parameters? Allow spaces? APPEND at least?
-		String[] args = s.split("\\s");
-		try {
-			lsts[lid] = new FileOutputStream(args[0]);
-		} catch (Exception ee) {
-			System.err.format("Invalid file in attachment: %s\n", s);
-			return;
-		}
-	}
-
-	private static void attachPipe(int lid, String s) {
-		System.err.format("Pipe attachments not yet implemented: %s\n", s);
-	}
-
-	private static void attachClass(Properties props, int lid, String s) {
-		String[] args = s.split("\\s");
-		Vector<String> argv = new Vector<String>(Arrays.asList(args));
-		// try to construct from class...
-		try {
-			Class<?> clazz = Class.forName(args[0]);
-			Constructor<?> ctor = clazz.getConstructor(Properties.class,
-					argv.getClass());
-			lsts[lid] = (OutputStream)ctor.newInstance(props, argv);
-		} catch (Exception ee) {
-ee.printStackTrace();
-			System.err.format("Invalid class in attachment: \"%s\"\n", args[0]);
-			return;
-		}
-	}
 
 	public byte[] checkRecvMsg(byte clientId) {
 		// For HostFileBdos, this is never used.
@@ -677,7 +569,11 @@ ee.printStackTrace();
 		}
 		//dumpMsg(true, fnc, msgbuf, cpnMsg, n);
 		int lr = -1;
-		if (fnc == 64 || chkClient(clientId)) {
+		boolean log = srv.chkClient(clientId);
+		if (!log) { // try auto-login...
+			log = srv.addClient(clientId);
+		}
+		if (fnc == 64 || log) {
 			lr = bdosFunction(fnc, msgbuf, cpnMsg, len);
 		}
 		//dumpMsg(false, fnc, msgbuf, cpnMsg, lr);
@@ -781,85 +677,10 @@ ee.printStackTrace();
 		}
 	}
 
-	private static synchronized boolean acquireLst(int cid, int lst) {
-		// TODO: lock after checking max?
-		if (HostFileBdos.cfgTab.max == 1) {
-			return true;
-		}
-		if (lstCid[lst] == cid) {
-			return true;
-		}
-		if (lstCid[lst] != 0xff) {
-			return false;
-		}
-		lstCid[lst] = cid;
-		return true;
-	}
-
-	private static synchronized void releaseLst(int cid, int lst) {
-		// TODO: confirm we own it?
-		lstCid[lst] = 0xff;
-	}
-
-	private static synchronized boolean addClient(int cid) {
-		int x;
-		if (HostFileBdos.cfgTab.cur >= HostFileBdos.cfgTab.max) {
-			return false;
-		}
-		int y = 16;
-		for (x = 0; x < 16; ++x) {
-			if ((HostFileBdos.cfgTab.rid[x] & 0xff) == cid) {
-				return true;
-			}
-			if ((HostFileBdos.cfgTab.vec & (1 << x)) == 0) {
-				if (y >= 16) {
-					y = x;
-				}
-			}
-		}
-		if (y >= 16) {
-			return false;	// should not happen
-		}
-		++HostFileBdos.cfgTab.cur;
-		HostFileBdos.cfgTab.vec |= (1 << y);
-		HostFileBdos.cfgTab.rid[y] = (byte)cid;
-		return true;
-	}
-
-	private static synchronized boolean chkClient(int cid) {
-		int x;
-		for (x = 0; x < 16; ++x) {
-			if ((HostFileBdos.cfgTab.rid[x] & 0xff) == cid) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private static synchronized int rmClient(int cid) {
-		int x;
-		for (x = 0; x < 16; ++x) {
-			if ((HostFileBdos.cfgTab.rid[x] & 0xff) == cid) {
-				break;
-			}
-		}
-		if (x < 16) {
-			--HostFileBdos.cfgTab.cur;
-			HostFileBdos.cfgTab.vec &= ~(1 << x);
-			HostFileBdos.cfgTab.rid[x] = (byte)0xff;
-			return 0;
-		}
-		return -1;
-	}
 
 	public void shutdown() {
 		closeAll(0xffff);
-		for (int x = 0; x < lstCid.length; ++x) {
-			if (lstCid[x] == clientId) {
-				releaseLst(clientId, x);
-			}
-		}
-		rmClient(clientId);
+		srv.shutdown(clientId);
 	}
 
 	// Debug only.
@@ -944,10 +765,10 @@ ee.printStackTrace();
 
 	String cpmDrive(int drive) {
 		drive &= 0x0f;
-		if (dirs[drive] != null) { // must also exist...
-			return dirs[drive];
+		if (srv.dirs[drive] != null) { // must also exist...
+			return srv.dirs[drive];
 		}
-		File p = new File(String.format("%s/%c", dir, (char)(drive + 'a')));
+		File p = new File(String.format("%s/%c", srv.dir, (char)(drive + 'a')));
 		if (!p.exists()) {
 			try {
 				p.mkdirs();
@@ -958,8 +779,8 @@ ee.printStackTrace();
 			// and leave dirs[x] 'null' and keep trying...???
 			return p.getAbsolutePath();
 		} else {
-			dirs[drive] = p.getAbsolutePath();
-			return dirs[drive];
+			srv.dirs[drive] = p.getAbsolutePath();
+			return srv.dirs[drive];
 		}
 	}
 
@@ -1153,7 +974,7 @@ ee.printStackTrace();
 		if (name.charAt(0) == ' ') { // DIR LABEL
 			cpmDirl dirLab = new cpmDirl();
 			dirLab.name = String.format("SERVER%02x%c  ",
-						cfgTab.id, curSearch.drv + 'A');
+						srv.cfgTab.id, curSearch.drv + 'A');
 			dirLab.ext = dirMode;
 			dirLab.drv = (byte)0x20;
 			dirLab.put(buf, start);
@@ -2331,7 +2152,7 @@ ee.printStackTrace();
 	}
 	private int login(byte[] msgbuf, int start, int len) {
 		// Might already be logged in, must handle/ignore
-		if (!addClient(clientId)) {
+		if (!srv.addClient(clientId)) {
 			msgbuf[start] = (byte)0xff;
 			msgbuf[start + 1] = (byte)0x0c;
 			return 2;
@@ -2340,7 +2161,7 @@ ee.printStackTrace();
 		return 1;
 	}
 	private int logoff(byte[] msgbuf, int start, int len) {
-		rmClient(clientId);
+		srv.rmClient(clientId);
 		msgbuf[start] = (byte)0;
 		return 1;
 	}
@@ -2350,8 +2171,8 @@ ee.printStackTrace();
 		return 1;
 	}
 	private int getServCfg(byte[] msgbuf, int start, int len) {
-		cfgTab.put(msgbuf, start);
-		return cfgTab.byteLength;
+		srv.cfgTab.put(msgbuf, start);
+		return srv.cfgTab.byteLength;
 	}
 	private int setDefPwd(byte[] msgbuf, int start, int len) {
 		msgbuf[start] = (byte)0;
@@ -2414,7 +2235,7 @@ ee.printStackTrace();
 
 	private int listOut(byte[] msgbuf, int start, int len) {
 		int lid = msgbuf[start] & 0xff;
-		if (lid >= 16 || lsts[lid] == null) {
+		if (lid >= 16 || srv.lsts[lid] == null) {
 			msgbuf[start] = (byte)0;
 			return 1;
 		}
@@ -2426,7 +2247,7 @@ ee.printStackTrace();
 		boolean acquire = (lstLen > 1 || (msgbuf[start + 1] & 0xff) != 0xff);
 		// last byte is at msgbuf[start + 1 + lstLen - 1]
 		boolean release = ((msgbuf[start + lstLen] & 0xff) == 0xff);
-		if (acquire && !acquireLst(clientId, lid)) {
+		if (acquire && !srv.acquireLst(clientId, lid)) {
 			// TODO: log a message, someplace, to help user
 			// understand why their output did not print.
 			// By default, CP/M will never recognize an error
@@ -2443,10 +2264,10 @@ ee.printStackTrace();
 		}
 		// hopefully this doesn't sleep...
 		try {
-			lsts[lid].write(msgbuf, start + 1, len - 1);
+			srv.lsts[lid].write(msgbuf, start + 1, len - 1);
 		} catch (Exception ee) {}
 		if (release) {
-			releaseLst(clientId, lid);
+			srv.releaseLst(clientId, lid);
 		}
 		msgbuf[start] = (byte)0;
 		return 1;
