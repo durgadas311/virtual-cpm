@@ -1,4 +1,4 @@
-// Copyright (c) 2016 Douglas Miller <durgadas311@gmail.com>
+// Copyright (c) 2022 Douglas Miller <durgadas311@gmail.com>
 
 import java.util.Arrays;
 import java.util.Vector;
@@ -384,7 +384,29 @@ public class HostFileBdos implements NetworkServer {
 		public cpmDpb() {
 		}
 
+		// clone DPB, customized for drive
+		public cpmDpb(cpmDpb dpb, int drv) {
+			spt = dpb.spt;
+			bsh = dpb.bsh;
+			blm = dpb.blm;
+			exm = dpb.exm;
+			dsm = dpb.dsm;
+			drm = dpb.drm;
+			al0 = dpb.al0;
+			cks = dpb.cks;
+			off = dpb.off;
+			// This is required because ZSDOS's COPY.COM
+			// uses DPB.DRM to allocate a sort list, and
+			// it behaves very badly if there end up being
+			// more files than that.
+			String dir = cpmDrive(drv);
+			int n = new File(dir).list().length + 16;
+			if (n > 65534) n = 65534; // an impractical max?
+			if (n > (drm & 0xffff)) drm = (short)n;
+		}
+
 		public cpmDpb(byte[] buf, int start) {
+			// TODO: implement if needed
 		}
 
 		public void put(byte[] buf, int start) {
@@ -447,6 +469,7 @@ public class HostFileBdos implements NetworkServer {
 	private long phyExt;
 	private String fileName;
 	private String pathName;
+	private int nfile;
 
 	// Start of CP/NET payload in buffer...
 	static final int cpnMsg = NetworkServer.DAT;
@@ -461,6 +484,7 @@ public class HostFileBdos implements NetworkServer {
 	static final int EACCES = 6;
 	static final int EAGAIN = 9;
 
+	private boolean debug = false;
 	protected CpnetServer srv;
 
 	// args: "HostFileBdos" [root-dir [tmp-drv]]
@@ -475,8 +499,17 @@ public class HostFileBdos implements NetworkServer {
 		curCompat = 0;
 		curSearch = new cpmSearch();
 		curDpb = new cpmDpb();
-		openFiles = new OpenFile[DEF_NFILE];
-		for (int x = 0; x < DEF_NFILE; ++x) {
+		nfile = DEF_NFILE;
+		String s = null;
+		s = props.getProperty(prefix + "_nfile");
+		if (s != null) {
+			int n = Integer.valueOf(s);
+			if (n > DEF_NFILE) {
+				nfile = n;
+			}
+		}
+		openFiles = new OpenFile[nfile];
+		for (int x = 0; x < nfile; ++x) {
 			openFiles[x] = new OpenFile();
 		}
 		sFcb = new cpmSfcb();
@@ -496,7 +529,13 @@ public class HostFileBdos implements NetworkServer {
 		curDpb.cks = 0; // perhaps should be non-zero, as
 				// files can change without notice.
 				// But clients shouldn't be handling that.
-		String s = null;
+		s = props.getProperty(prefix + "_mindrm");
+		if (s != null) {
+			// User beware - no sanity checks here
+			curDpb.drm = (short)(int)Integer.valueOf(s);
+		}
+		s = props.getProperty(prefix + "_debug");
+		debug = (s != null);
 		s = props.getProperty(prefix + "_nosys");
 		nosys = (s != null);
 		// login this client - unless we wait for LOGIN message with PASSWORD...
@@ -535,6 +574,21 @@ public class HostFileBdos implements NetworkServer {
 		if (!silent) {
 			System.err.format("Creating HostFileBdos %02x device with root dir %s\n",
 						srv.cfgTab.id, srv.dir);
+		}
+		if (debug) {
+			for (int x = 0; x < 16; ++x) {
+				if (srv.dirs[x] == null) continue;
+				System.err.format("Drive %c: dir %s\n",
+							(char)('A'+x), srv.dirs[x]);
+			}
+			// TODO: display more config.
+			System.err.format("SYS attributes %sabled\n",
+					nosys ? "dis" : "en");
+			for (int x = 0; x < 16; ++x) {
+				if (srv.lsts[x] == null) continue;
+				System.err.format("LST: %x configured %s\n", x,
+					srv.lsts[x].getClass().getName());
+			}
 		}
 	}
 
@@ -810,50 +864,64 @@ public class HostFileBdos implements NetworkServer {
 	}
 
 	// Not used, as init is automatic on Search First.
-	void cpmFindInit(cpmFind find, int drive, String pattern) {
-		if (find.dir != null) {
-			find.dir = null; // "close" previous file list...
+	void cpmFindInit(cpmSearch search, String pattern) {
+		if (search.find.dir != null) {
+			search.find.dir = null; // "close" previous file list...
 		}
-		find.pat = pattern;
-		find.path = cpmDrive(drive);
-		find.dirlen = find.path.length(); // not used?
-		find.dir = new File(find.path).list();
-		find.index = 0;
-		if (find.dir == null) {
-			//System.err.format("no dir: %s\n", find.path);
+		search.find.pat = pattern;
+		search.find.path = cpmDrive(search.drv);
+		search.find.dirlen = search.find.path.length(); // not used?
+		search.find.dir = new File(search.find.path).list();
+		search.find.index = 0;
+		if (search.find.dir == null) {
+			//System.err.format("no dir: %s\n", search.find.path);
 		}
 	}
 
-	String cpmFind(cpmFind find, byte usr) {
-		if (find.dir == null) {
+	// 'de' may contain user number prefix
+	boolean fcbMatches(String de, cpmSearch search) {
+		int x;
+		cpmFcb fcb = new cpmFcb();
+		copyOutDir(fcb, de);
+		// fcb.drv is user number
+		if (fcb.drv != search.usr) {
+			return false;
+		}
+		for (x = 0; x < 11; ++x) {
+			if (search.find.pat.charAt(x) != '?' &&
+				search.find.pat.charAt(x) != fcb.name.charAt(x)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	String cpmFind(cpmSearch search) {
+		if (search.find.dir == null) {
 			errno = ENXIO;
 			return null;
 		}
 		String de = null;
 		do {
-			if (find.index >= find.dir.length) {
+			if (search.find.index >= search.find.dir.length) {
 				errno = ENOENT;
 				return null;
 			}
-			de = find.dir[find.index++];
+			de = search.find.dir[search.find.index++];
 			if (de.startsWith(".")) {
 				continue;
 			}
-			//System.err.format("looking at %s... %s\n", de.d_name, find.pat);
-			// need to prevent "*.*" at user 0 from matching all users!
-			if (usr == 0 &&
-				(de.length() > 1 && de.charAt(1) == ':' ||
-				de.length() > 2 && de.charAt(2) == ':')) {
-				continue;
-			}
-			if (de.matches(find.pat)) {
+			//System.err.format("looking at %s... %s\n",
+			//				de.d_name, search.find.pat);
+			if (fcbMatches(de, search)) {
 				break;
 			}
 		} while (true);
-		find.base = de;
-		return cpmNameFound(find);
+		search.find.base = de;
+		return cpmNameFound(search.find);
 	}
 
+	// convert native filename to CP/M
 	String getFileName(cpmFcb fcb) {
 		int x;
 		String dst = "";
@@ -867,46 +935,6 @@ public class HostFileBdos implements NetworkServer {
 			dst += Character.toLowerCase(fcb.name.charAt(x));
 		}
 		return dst;
-	}
-
-	String getAmbFileName(cpmFcb fcb, byte usr) {
-		int x;
-		String buf = "";
-		boolean sawQ = false;
-		char c;
-		for (x = 0; x < 8 && (fcb.name.charAt(x)) != ' '; ++x) {
-			c = fcb.name.charAt(x);
-			if (c == '?') {
-				buf += ".*";
-				sawQ = true;
-				break;
-			}
-			if (c == '$') {
-				buf += '\\';
-			}
-			buf += Character.toLowerCase(c);
-		}
-		for (x = 8; x < 11 && (fcb.name.charAt(x)) != ' '; ++x) {
-			c = fcb.name.charAt(x);
-			if (x == 8) {
-				if (c == '?') {
-					// special case, need "*.*" to be just "*"
-					if (sawQ) {
-						break;
-					}
-				}
-				buf += "\\.";
-			}
-			if (c == '?') {
-				buf += ".*";
-				break;
-			}
-			if (c == '$') {
-				buf += '\\';
-			}
-			buf += Character.toLowerCase(c);
-		}
-		return cpmFilename(usr, buf);
 	}
 
 	private void dumpDirent(byte[] buf, int start) {
@@ -1050,7 +1078,7 @@ public class HostFileBdos implements NetworkServer {
 			// but caller MUST invoke copyOutSearch() each time.
 			return cpmNameFound(search.find);
 		}
-		String f = cpmFind(search.find, search.usr);
+		String f = cpmFind(search);
 		if (f == null) {
 			return null;
 		}
@@ -1128,7 +1156,7 @@ public class HostFileBdos implements NetworkServer {
 			search.ext = '?';
 			search.maxdc = (byte)(search.cpm3 ? 3 : 4);
 			d = (byte)curDsk;
-			pat = ".*";
+			pat = "???????????";
 		} else {
 			search.full = false;
 			search.cpm3 = false; // don't care if !full
@@ -1138,12 +1166,12 @@ public class HostFileBdos implements NetworkServer {
 			} else {
 				--d;
 			}
-			pat = getAmbFileName(fcb, u);
+			pat = new String(fcb.name);
 		}
 		search.drv = d;
 		search.usr = u;
 		//System.err.format("Searching \"%s\" user %d drive %c\n", pat, u, 'A'+d);
-		cpmFindInit(search.find, search.drv, pat);
+		cpmFindInit(search, pat);
 		return commonSearch(search);
 	}
 
@@ -1167,12 +1195,12 @@ public class HostFileBdos implements NetworkServer {
 
 	int newFileFcb() {
 		int x;
-		for (x = 0; x < DEF_NFILE; ++x) {
+		for (x = 0; x < nfile; ++x) {
 			if (openFiles[x].fd == null) {
 				break;
 			}
 		}
-		if (x >= DEF_NFILE) {
+		if (x >= nfile) {
 			System.err.format("Too many open files\n");
 			return -1;
 		}
@@ -1185,7 +1213,7 @@ public class HostFileBdos implements NetworkServer {
 			return -1;
 		}
 		int x = fcb.fd;
-		if (x < 0 || x >= DEF_NFILE) {
+		if (x < 0 || x >= nfile) {
 			fcb.fd = fcb.fd_ = 0;
 			return -1;
 		}
@@ -1213,7 +1241,7 @@ public class HostFileBdos implements NetworkServer {
 	void closeAll(int vec) {
 		int n = 0;
 		int x;
-		for (x = 0; x < DEF_NFILE; ++x) {
+		for (x = 0; x < nfile; ++x) {
 			if (openFiles[x].fd != null && (openFiles[x].drv & vec) != 0) {
 				try {
 					openFiles[x].fd.close();
@@ -1443,8 +1471,10 @@ public class HostFileBdos implements NetworkServer {
 	}
 
 	private int getDPB(byte[] msgbuf, int start, int len) {
-		curDpb.put(msgbuf, start);
-		return curDpb.byteLength;
+		int d = msgbuf[cpnMsg] & 0x0f;
+		cpmDpb dpb = new cpmDpb(curDpb, d);
+		dpb.put(msgbuf, start);
+		return dpb.byteLength;
 	}
 	private int writeProt(byte[] msgbuf, int start, int len) {
 		curROVec |= (1 << (msgbuf[start] & 0x0f));
@@ -2095,7 +2125,7 @@ public class HostFileBdos implements NetworkServer {
 	}
 	private int flushBuf(byte[] msgbuf, int start, int len) {
 		int x;
-		for (x = 0; x < DEF_NFILE; ++x) {
+		for (x = 0; x < nfile; ++x) {
 			if (openFiles[x].fd != null) {
 				try {
 					openFiles[x].fd.getChannel().force(true);

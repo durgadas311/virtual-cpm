@@ -38,6 +38,8 @@ vcpm.tgz: __FRC__
 		vm/*.java
 
 ship:
+	rsync -Wuv VirtualCpm.jar ../bin
+	rsync -Wuv VirtualCpm.jar ~/git/cpnet-z80/tools
 	rsync -Wuv VirtualCpm.jar ~/git/MmsCpm3/tools/vcpm
 
 __FRC__:
