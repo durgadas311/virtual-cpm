@@ -882,7 +882,10 @@ public class HostFileBdos implements NetworkServer {
 	boolean fcbMatches(String de, cpmSearch search) {
 		int x;
 		cpmFcb fcb = new cpmFcb();
-		copyOutDir(fcb, de);
+		fcb.dummy = true;
+		if (!copyOutDir(fcb, de)) {
+			return false;
+		}
 		// fcb.drv is user number
 		if (fcb.drv != search.usr) {
 			return false;
@@ -958,15 +961,17 @@ public class HostFileBdos implements NetworkServer {
 			buf[start+034], buf[start+035], buf[start+036], buf[start+037]);
 	}
 
-	void copyOutDir(cpmFcb fcb, String name) {
+	boolean copyOutDir(cpmFcb fcb, String name) {
 		byte[] nam = new byte[11];
 		int t = name.indexOf(':');
 		byte u;
+		boolean ret = true;
 		if (t > 0) {
 			try {
 				u = Byte.valueOf(name.substring(0, t));
 			} catch(Exception ee) {
 				u = 0;
+				ret = false;
 			}
 			++t;
 		} else {
@@ -982,18 +987,24 @@ public class HostFileBdos implements NetworkServer {
 			nam[x++] = ' ';
 		}
 		while (t < name.length() && name.charAt(t) != '.') {
+			ret = false;	// name too long
 			++t;
 		}
 		if (t < name.length() && name.charAt(t) == '.') {
 			++t;
 		}
+		// if there is a second period, stop there (invalid 8+3 name)
 		while (t < name.length() && name.charAt(t) != '.' && x < 11) {
 			nam[x++] = (byte)Character.toUpperCase(name.charAt(t++));
 		}
 		while (x < 11) {
 			nam[x++] = ' ';
 		}
+		if (t < name.length()) {
+			ret = false;	// type too long
+		}
 		fcb.name = new String(nam);
+		return ret;
 	}
 
 	// 'start' points to DIRENT (may be DIRBUF[0])
