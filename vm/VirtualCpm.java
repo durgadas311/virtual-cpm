@@ -220,6 +220,12 @@ public class VirtualCpm implements Computer, Runnable {
 		while (x < 4) {
 			mem[SCB_DSO + x++] = (byte)-1;
 		}
+		s = System.getenv("CPMShow");
+		if (s != null && s.length() == 1) {
+			s = hfb.cpmDrive((s.charAt(0) - 1) & 0x0f);
+			System.out.println(s);
+			System.exit(0);
+		}
 	}
 
 	public void reset() {
@@ -302,6 +308,7 @@ public class VirtualCpm implements Computer, Runnable {
 	}
 	public void execDone() {
 	}
+	public void changeSpeed(int a,int b) {}
 
 	private int getWORD(int adr) {
 		int val = mem[adr + 0] & 0xff;
