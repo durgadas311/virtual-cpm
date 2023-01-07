@@ -1,0 +1,2 @@
+#!/bin/bash
+exec java -jar /path/to/git/virtual-cpm/vm/VirtualCpm.jar "${@}"

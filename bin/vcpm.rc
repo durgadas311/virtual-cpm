@@ -1,0 +1,5 @@
+# These are just examples
+silent
+vcpm_root_dir = /home/<user>/VCPM
+#vcpm_dso = def,a:
+#vcpm_nosys
