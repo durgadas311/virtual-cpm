@@ -172,27 +172,32 @@ public class VirtualCpm implements Computer, Runnable {
 		stopWait = new Semaphore(0);
 		cpuLock = new ReentrantLock();
 		cmds = new Vector<String[]>();
+		mem = new byte[65536];
 		boolean silent = (props.getProperty("silent") != null);
 		s = props.getProperty("vcpm_cpu");
 		if (s != null) {
 			if (s.matches("[iI]?8080")) {
 				cpu = new I8080(this);
+				disas = new I8080Disassembler(mem);
 			} else if (s.matches("[iI]?8085")) {
 				cpu = new I8085(this);
+				disas = new I8085Disassembler(mem);
 			} else if (s.matches("[zZ]80")) {
 				cpu = new Z80(this);
+				disas = new Z80DisassemblerMAC80(mem);
 			} else if (s.matches("[zZ]180")) {
-				cpu = new Z180(this, null, true); // Z80S180
+				Z180 z180 = new Z180(this, null, true); // Z80S180
+				cpu = z180;
+				disas = new Z180DisassemblerMAC80(mem, z180);
 			}
 		}
 		if (cpu == null) {
 			cpu = new Z80(this);
+			disas = new Z80DisassemblerMAC80(mem);
 		}
 		if (!silent) {
 			System.err.format("Using CPU %s\n", cpu.getClass().getName());
 		}
-		mem = new byte[65536];
-		disas = new Z80DisassemblerMAC80(mem);
 		lin = new BufferedReader(new InputStreamReader(System.in));
 		CpnetServer srv = new CpnetServer(props, "vcpm", 'P', (byte)0x00, 1, null);
 		hfb = new HostFileBdos(props, "vcpm", new Vector<String>(), 0xfe, srv);
