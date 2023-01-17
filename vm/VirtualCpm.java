@@ -69,7 +69,7 @@ public class VirtualCpm implements Computer, Runnable {
 	};
 	static String fdelim = " \t\r\000;=<>.:,|[]";
 
-	private Z80 cpu;
+	private CPU cpu;
 	private Z80Disassembler disas;
 	private long clock;
 	private byte[] mem;
@@ -172,7 +172,25 @@ public class VirtualCpm implements Computer, Runnable {
 		stopWait = new Semaphore(0);
 		cpuLock = new ReentrantLock();
 		cmds = new Vector<String[]>();
-		cpu = new Z80(this);
+		boolean silent = (props.getProperty("silent") != null);
+		s = props.getProperty("vcpm_cpu");
+		if (s != null) {
+			if (s.matches("[iI]?8080")) {
+				cpu = new I8080(this);
+			} else if (s.matches("[iI]?8085")) {
+				cpu = new I8085(this);
+			} else if (s.matches("[zZ]80")) {
+				cpu = new Z80(this);
+			} else if (s.matches("[zZ]180")) {
+				cpu = new Z180(this, null, true); // Z80S180
+			}
+		}
+		if (cpu == null) {
+			cpu = new Z80(this);
+		}
+		if (!silent) {
+			System.err.format("Using CPU %s\n", cpu.getClass().getName());
+		}
 		mem = new byte[65536];
 		disas = new Z80DisassemblerMAC80(mem);
 		lin = new BufferedReader(new InputStreamReader(System.in));
