@@ -5,11 +5,11 @@ import z80core.*;
 
 class Z80Tracer extends CPUTracer {
 	private Z80 cpu;
-	private byte[] mem;
+	private Memory mem;
 	private Z80Disassembler disas;
 	private String traceStr;
 
-	public Z80Tracer(Properties props, CPU cpu, byte[] mem, String args) {
+	public Z80Tracer(Properties props, CPU cpu, Memory mem, String args) {
 		super(props, args);
 		this.cpu = (Z80)cpu;
 		this.mem = mem;
@@ -45,7 +45,8 @@ class Z80Tracer extends CPUTracer {
 		traceStr = String.format("{%05d} %04x: %02x %02x %02x %02x " +
 				": %s %02x %04x %04x %04x %04x %04x [%04x] {%%d} %s\n",
 			clk & 0xffff,
-			pc, mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3],
+			pc, mem.read(pc), mem.read(pc + 1),
+			mem.read(pc + 2), mem.read(pc + 3),
 			getFlags(),
 			cpu.getRegA(),
 			cpu.getRegBC(),

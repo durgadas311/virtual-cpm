@@ -4,13 +4,13 @@
 import z80core.*;
 
 public class Z180DisassemblerMAC80 implements Z80Disassembler {
-	byte[] mem;
+	Memory mem;
 	Z180 cpu;
 	boolean rom;
 	int bnk;
 	int lastLen;
 
-	public Z180DisassemblerMAC80(byte[] mem, Z180 cpu) {
+	public Z180DisassemblerMAC80(Memory mem, Z180 cpu) {
 		this.mem = mem;
 		this.cpu = cpu;
 	}
@@ -18,7 +18,11 @@ public class Z180DisassemblerMAC80 implements Z80Disassembler {
 	private int read8(int adr) {
 		++lastLen;
 		int pa = cpu.phyAddr(adr & 0xffff);
-		return mem[pa] & 0xff;
+		if (bnk < 0) {
+			return mem.read(pa);
+		} else {
+			return mem.read(rom, bnk, pa);
+		}
 	}
 
 	private int read16(int adr) {

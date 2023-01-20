@@ -10,7 +10,6 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.Properties;
 
 abstract class CPUTracer {
-	private Z80Disassembler disas;
 	private int traceLow = 0;
 	private int traceHigh = 0;
 	private int traceCount = 0;

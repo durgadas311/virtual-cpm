@@ -3,33 +3,47 @@
 // Uses the framework of Alberto Sánchez Terrén Z80 simulator.
 
 public class I8085Disassembler implements Z80Disassembler {
-	byte[] mem;
+	Memory mem;
 	boolean rom;
 	int bnk;
 	int lastLen;
 
-	public I8085Disassembler(byte[] mem) {
+	public I8085Disassembler(Memory mem) {
 		this.mem = mem;
 	}
 
 	private int read8(int adr) {
 		++lastLen;
-		return mem[adr & 0xffff] & 0xff;
+		if (bnk < 0) {
+			return mem.read(adr & 0xffff);
+		} else {
+			return mem.read(rom, bnk, adr & 0xffff);
+		}
 	}
 
 	private int read16(int adr) {
 		int w;
 		// little endian...
-		w = mem[adr & 0xffff] & 0xff;
-		++adr;
-		w |= ((mem[adr & 0xffff] & 0xff) << 8);
+		if (bnk < 0) {
+			w = mem.read(adr & 0xffff);
+			++adr;
+			w |= (mem.read(adr & 0xffff) << 8);
+		} else {
+			w = mem.read(rom, bnk, adr & 0xffff);
+			++adr;
+			w |= (mem.read(rom, bnk, adr & 0xffff) << 8);
+		}
 		lastLen += 2;
 		return w;
 	}
 
 	private int relAdr(int adr) {
 		byte d;
-		d = (byte)mem[adr & 0xffff];
+		if (bnk < 0) {
+			d = (byte)mem.read(adr & 0xffff);
+		} else {
+			d = (byte)mem.read(rom, bnk, adr & 0xffff);
+		}
 		++adr;
 		++lastLen;
 		return adr + d;
