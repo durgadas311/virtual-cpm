@@ -70,7 +70,7 @@ public class VirtualCpm implements Computer, Runnable {
 	static String fdelim = " \t\r\000;=<>.:,|[]";
 
 	private CPU cpu;
-	private Z80Disassembler disas;
+	private CPUTracer trc;
 	private long clock;
 	private byte[] mem;
 	private boolean running;
@@ -174,26 +174,37 @@ public class VirtualCpm implements Computer, Runnable {
 		cmds = new Vector<String[]>();
 		mem = new byte[65536];
 		boolean silent = (props.getProperty("silent") != null);
+		String t = props.getProperty("vcpm_trace");
 		s = props.getProperty("vcpm_cpu");
 		if (s != null) {
 			if (s.matches("[iI]?8080")) {
 				cpu = new I8080(this);
-				disas = new I8080Disassembler(mem);
+				if (t != null) {
+					trc = new I8080Tracer(props, cpu, mem, t);
+				}
 			} else if (s.matches("[iI]?8085")) {
 				cpu = new I8085(this);
-				disas = new I8085Disassembler(mem);
+				if (t != null) {
+					trc = new I8085Tracer(props, cpu, mem, t);
+				}
 			} else if (s.matches("[zZ]80")) {
 				cpu = new Z80(this);
-				disas = new Z80DisassemblerMAC80(mem);
+				if (t != null) {
+					trc = new Z80Tracer(props, cpu, mem, t);
+				}
 			} else if (s.matches("[zZ]180")) {
 				Z180 z180 = new Z180(this, null, true); // Z80S180
 				cpu = z180;
-				disas = new Z180DisassemblerMAC80(mem, z180);
+				if (t != null) {
+					trc = new Z180Tracer(props, cpu, mem, t);
+				}
 			}
 		}
 		if (cpu == null) {
 			cpu = new Z80(this);
-			disas = new Z80DisassemblerMAC80(mem);
+			if (t != null) {
+				trc = new Z80Tracer(props, cpu, mem, t);
+			}
 		}
 		if (!silent) {
 			System.err.format("Using CPU %s\n", cpu.getClass().getName());
@@ -1412,26 +1423,6 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 		doRET();
 	}
 
-	private void cpuDump() {
-		cpuDump(cpu.getRegPC());
-	}
-
-	private void cpuDump(int pc) {
-		System.err.format("%04x: %02x %02x %02x %02x : " +
-				"%02x %04x %04x %04x|%04x %04x [%04x] %s\n",
-			pc,
-			mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3],
-			cpu.getRegA(),
-			cpu.getRegBC(),
-			cpu.getRegDE(),
-			cpu.getRegHL(),
-			cpu.getRegIX(),
-			cpu.getRegIY(),
-			cpu.getRegSP(),
-			disas.disas(pc)
-			);
-	}
-
 	private void coreDump() {
 		try {
 			FileOutputStream f = new FileOutputStream("vcpm.core");
@@ -1471,7 +1462,9 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 
 	//////// Runnable /////////
 	public void run() {
+		long clock = 0;
 		int clk = 0;
+		boolean tracing = false;
 		coldStart();
 		while (cmds.size() > 0) {
 			warmStart();
@@ -1487,8 +1480,15 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 					}
 					PC = cpu.getRegPC();
 				}
+				// TODO: how to trace osTrap...
+				if (trc != null) {
+					tracing = trc.preTrace(PC, clock);
+				}
 				clk = cpu.execute();
-//cpuDump(PC);
+				if (tracing) {
+					trc.postTrace(PC, clk);
+				}
+				clock += clk;
 			}
 		}
 		if (coredump) coreDump();

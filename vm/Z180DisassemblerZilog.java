@@ -18,7 +18,7 @@ public class Z180DisassemblerZilog implements Z80Disassembler {
 	private int read8(int adr) {
 		++lastLen;
 		int pa = cpu.phyAddr(adr & 0xffff);
-		return mem[pa];
+		return mem[pa] & 0xff;
 	}
 
 	private int read16(int adr) {
