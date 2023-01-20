@@ -116,7 +116,7 @@ public class VirtualCpm implements Computer, Runnable {
 	static final int SCB_DATE = scb + 0x58; // date,hours,min,sec
 
 	private static VirtualCpm vcpm;
-	private static boolean coredump;
+	private static File coredump;
 
 	public static void main(String[] argv) {
 		Properties props = new Properties();
@@ -156,7 +156,17 @@ public class VirtualCpm implements Computer, Runnable {
 			props.setProperty(p, s.trim());
 		}
 		s = System.getenv("VCPMCoreDump");
-		coredump = (s != null);
+		if (s != null) {
+			if (s.length() > 0) {
+				coredump = new File(s);
+			} else {
+				coredump = new File("vcpm.core");
+			}
+		}
+		s = System.getenv("VCPMTrace");
+		if (s != null) {
+			props.setProperty("vcpm_trace", s);
+		}
 		s = System.getenv("CPMDefault");
 		if (s == null) {
 			s = "0A:";
@@ -584,6 +594,7 @@ public class VirtualCpm implements Computer, Runnable {
 				if (s.startsWith("#") || s.startsWith(";")) {
 					continue;
 				}
+				s = s.replace("$$", "$");
 				for (int x = 1; x < 10; ++x) {
 					String var = String.format("$%d", x);
 					if (x < argv.length) {
@@ -1423,9 +1434,9 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 		doRET();
 	}
 
-	private void coreDump() {
+	private void coreDump(File core) {
 		try {
-			FileOutputStream f = new FileOutputStream("vcpm.core");
+			FileOutputStream f = new FileOutputStream(core);
 			f.write(mem);
 			f.close();
 			System.err.format("CP/M core dumped\n");
@@ -1491,7 +1502,7 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 				clock += clk;
 			}
 		}
-		if (coredump) coreDump();
+		if (coredump != null) coreDump(coredump);
 		stopped = true;
 		stopWait.release();
 	}

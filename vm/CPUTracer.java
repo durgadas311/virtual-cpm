@@ -11,50 +11,65 @@ import java.util.Properties;
 
 abstract class CPUTracer {
 	private Z80Disassembler disas;
-	private int traceLow = -1;
-	private int traceHigh = -1;
-	private int traceCycles = 0;
+	private int traceLow = 0;
+	private int traceHigh = 0;
+	private int traceCount = 0x7fffffff; // infinity
+	private boolean traceOnce = false;
+
+	private int count = 0;
+	private boolean tracing = false;
 
 	// TODO: support changing tracing after ctor?
 	protected CPUTracer(Properties props, String args) {
 		String[] argv = args.split("\\s");
+		int x;
 
 		if (argv.length < 1) {
 			return;
 		}
-		if (argv[0].equalsIgnoreCase("pc") && argv.length > 1) {
-			traceLow = Integer.valueOf(argv[1], 16);
-			if (argv.length > 2) {
-				traceHigh = Integer.valueOf(argv[2], 16);
+		if (argv[0].indexOf(":") < 0) {
+			traceLow = Integer.valueOf(argv[0], 16);
+			traceHigh = traceLow + 1;
+		} else {
+			String[] range = argv[0].split(":");
+			if (range.length == 0 || range[0].length() == 0) {
+				traceLow = 0;
 			} else {
+				traceLow = Integer.valueOf(range[0], 16);
+			}
+			if (range.length <= 1 || range[1].length() == 0) {
 				traceHigh = 0x10000;
-			}
-		} else if (argv[0].equalsIgnoreCase("trigger") && argv.length > 1) {
-			traceLow = Integer.valueOf(argv[1], 16);
-			if (argv.length > 2) {
-				traceCycles = Integer.valueOf(argv[2]);
 			} else {
-				traceCycles = -1; // infinity
+				traceHigh = Integer.valueOf(range[1], 16);
 			}
-		// TODO: others? "on"? "oneshot"?
 		}
+		for (x = 1; x < argv.length; ++x) {
+			if (argv[x].equalsIgnoreCase("oneshot")) {
+				traceOnce = true;
+			} else {
+				traceCount = Integer.valueOf(argv[x]);
+			}
+		}
+		// System.err.format("trace %04x %04x %d %s\n",
+		//	traceLow, traceHigh, traceCount, traceOnce);
 	}
 
 	protected boolean shouldTrace(int pc) {
-		if (traceCycles == 0 && pc >= traceLow && pc < traceHigh) {
-			return true;
+		boolean trace = (pc >= traceLow && pc < traceHigh);
+		if (tracing && !trace) {
+			count = traceCount;
+			if (traceOnce) {
+				traceHigh = traceLow = 0;
+			}
 		}
-		return (traceCycles > 0);
+		tracing = trace;
+		return tracing || (count > 0);
 	}
 
 	protected void didTrace(int pc, int cy) {
-		if (traceCycles > 0) {
-			traceCycles -= cy;
-			if (traceCycles < 0) {
-				traceCycles = 0;
-			}
+		if (count > 0) {
+			--count;
 		}
-		// TODO: oneshot? if pc outside range, turn off?
 	}
 
 	// before cpu.execute()...
