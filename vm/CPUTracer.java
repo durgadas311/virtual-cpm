@@ -13,7 +13,7 @@ abstract class CPUTracer {
 	private Z80Disassembler disas;
 	private int traceLow = 0;
 	private int traceHigh = 0;
-	private int traceCount = 0x7fffffff; // infinity
+	private int traceCount = 0;
 	private boolean traceOnce = false;
 
 	private int count = 0;

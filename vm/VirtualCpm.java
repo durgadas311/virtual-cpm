@@ -157,15 +157,15 @@ public class VirtualCpm implements Computer, Runnable {
 		}
 		s = System.getenv("VCPMCoreDump");
 		if (s != null) {
-			if (s.length() > 0) {
-				coredump = new File(s);
-			} else {
-				coredump = new File("vcpm.core");
-			}
+			props.setProperty("vcpm_dump", s);
 		}
 		s = System.getenv("VCPMTrace");
 		if (s != null) {
 			props.setProperty("vcpm_trace", s);
+		}
+		s = System.getenv("VCPMCPU");
+		if (s != null) {
+			props.setProperty("vcpm_cpu", s);
 		}
 		s = System.getenv("CPMDefault");
 		if (s == null) {
@@ -214,6 +214,14 @@ public class VirtualCpm implements Computer, Runnable {
 			cpu = new Z80(this);
 			if (t != null) {
 				trc = new Z80Tracer(props, cpu, mem, t);
+			}
+		}
+		s = props.getProperty("vcpm_dump");
+		if (s != null) {
+			if (s.length() > 0) {
+				coredump = new File(s);
+			} else {
+				coredump = new File("vcpm.core");
 			}
 		}
 		if (!silent) {
