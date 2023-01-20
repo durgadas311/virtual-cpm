@@ -24,7 +24,7 @@ abstract class CPUTracer {
 		String[] argv = args.split("\\s");
 		int x;
 
-		if (argv.length < 1) {
+		if (args.length() == 0 || argv.length < 1) {
 			return;
 		}
 		if (argv[0].indexOf(":") < 0) {
