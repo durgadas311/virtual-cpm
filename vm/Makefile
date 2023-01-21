@@ -1,4 +1,4 @@
-CLASS_PATH = .:z80cpu/z80core.jar
+CLASS_PATH = .:z80cpu/z80core.jar:z80cpu/z80debug.jar
 
 JAVAS = $(filter-out Cpnet%Server.java,$(wildcard *.java))
 CLASSES = $(subst .java,.class,$(JAVAS))
@@ -27,10 +27,14 @@ temp: __FRC__
 	mkdir -p temp
 	rm -rf temp/*
 	cd temp; jar -xf ../z80cpu/z80core.jar
+	cd temp; jar -xf ../z80cpu/z80debug.jar
 	rm -rf temp/META-INF
 
 z80cpu/z80core.jar:
 	make -C z80cpu z80core.jar
+
+z80cpu/z80debug.jar:
+	make -C z80cpu z80debug.jar
 
 vcpm.tgz: __FRC__
 	cd ..; tar -czf vm/vcpm.tgz vm/Makefile \

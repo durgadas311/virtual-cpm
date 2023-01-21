@@ -10,8 +10,9 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.Properties;
 
 import z80core.*;
+import z80debug.*;
 
-public class VirtualCpm implements Computer, Runnable {
+public class VirtualCpm implements Computer, Memory, Runnable {
 
 	static final int passE = 0x01;
 	static final int passDE = 0x02;
@@ -73,7 +74,6 @@ public class VirtualCpm implements Computer, Runnable {
 	private CPUTracer trc;
 	private long clock;
 	private byte[] mem;
-	private Memory mm;
 	private boolean running;
 	private boolean stopped;
 	private Semaphore stopWait;
@@ -186,36 +186,35 @@ public class VirtualCpm implements Computer, Runnable {
 		mem = new byte[65536];
 		boolean silent = (props.getProperty("silent") != null);
 		String t = props.getProperty("vcpm_trace");
-		mm = new Memory(mem);
 		s = props.getProperty("vcpm_cpu");
 		if (s != null) {
 			if (s.matches("[iI]?8080")) {
 				cpu = new I8080(this);
 				if (t != null) {
-					trc = new I8080Tracer(props, cpu, mm, t);
+					trc = new I8080Tracer(props, cpu, this, t);
 				}
 			} else if (s.matches("[iI]?8085")) {
 				cpu = new I8085(this);
 				if (t != null) {
-					trc = new I8085Tracer(props, cpu, mm, t);
+					trc = new I8085Tracer(props, cpu, this, t);
 				}
 			} else if (s.matches("[zZ]80")) {
 				cpu = new Z80(this);
 				if (t != null) {
-					trc = new Z80Tracer(props, cpu, mm, t);
+					trc = new Z80Tracer(props, cpu, this, t);
 				}
 			} else if (s.matches("[zZ]180")) {
 				Z180 z180 = new Z180(this, null, true); // Z80S180
 				cpu = z180;
 				if (t != null) {
-					trc = new Z180Tracer(props, cpu, mm, t);
+					trc = new Z180Tracer(props, cpu, this, t);
 				}
 			}
 		}
 		if (cpu == null) {
 			cpu = new Z80(this);
 			if (t != null) {
-				trc = new Z80Tracer(props, cpu, mm, t);
+				trc = new Z80Tracer(props, cpu, this, t);
 			}
 		}
 		s = props.getProperty("vcpm_dump");
@@ -1501,7 +1500,7 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 				clock += clk;
 			}
 		}
-		if (coredump != null) mm.dumpCore(coredump);
+		if (coredump != null) dumpCore(coredump);
 		stopped = true;
 		stopWait.release();
 	}
@@ -1510,4 +1509,27 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 		String ret = "";
 		return ret;
 	}
+
+	// Memory interface implemented
+	public int read(boolean rom, int bank, int address) { // debugger interface
+		return read(address);
+	}
+	public int read(int address) {
+		return mem[address & 0xffff] & 0xff;
+	}
+	public void write(int address, int value) {
+		// not allowed for debugging
+	}
+	// public void reset() { }
+	public void dumpCore(String file) {
+		try {
+			FileOutputStream f = new FileOutputStream(file);
+			f.write(mem);
+			f.close();
+			System.err.format("VCP/M core dumped to \"%s\"\n", file);
+		} catch (Exception ee) {
+			ee.printStackTrace();
+		}
+	}
+	// public String dumpDebug() { return ""; }
 }
