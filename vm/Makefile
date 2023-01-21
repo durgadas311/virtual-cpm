@@ -27,6 +27,7 @@ temp: __FRC__
 	mkdir -p temp
 	rm -rf temp/*
 	cd temp; jar -xf ../z80cpu/z80core.jar
+	rm -rf temp/META-INF
 	cd temp; jar -xf ../z80cpu/z80debug.jar
 	rm -rf temp/META-INF
 
