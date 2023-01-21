@@ -3,7 +3,7 @@
 // Uses the framework of Alberto Sánchez Terrén Z80 simulator.
 import z80core.*;
 
-public class Z180DisassemblerZilog implements Z80Disassembler {
+public class Z180DisassemblerZilog implements CPUDisassembler {
 	Memory mem;
 	Z180 cpu;
 	boolean rom;

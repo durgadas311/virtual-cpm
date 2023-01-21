@@ -2,7 +2,7 @@
 
 // Uses the framework of Alberto Sánchez Terrén Z80 simulator.
 
-public class Z80DisassemblerMAC80 implements Z80Disassembler {
+public class Z80DisassemblerMAC80 implements CPUDisassembler {
 	Memory mem;
 	boolean rom;
 	int bnk;

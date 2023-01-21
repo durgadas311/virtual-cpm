@@ -6,7 +6,7 @@ import z80core.*;
 class Z180Tracer extends CPUTracer {
 	private Z180 cpu;
 	private Memory mem;
-	private Z80Disassembler disas;
+	private CPUDisassembler disas;
 	private String traceStr;
 
 	public Z180Tracer(Properties props, CPU cpu, Memory mem, String args) {
