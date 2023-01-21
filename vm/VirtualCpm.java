@@ -191,30 +191,30 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 			if (s.matches("[iI]?8080")) {
 				cpu = new I8080(this);
 				if (t != null) {
-					trc = new I8080Tracer(props, cpu, this, t);
+					trc = new I8080Tracer(props, "vcpm", cpu, this, t);
 				}
 			} else if (s.matches("[iI]?8085")) {
 				cpu = new I8085(this);
 				if (t != null) {
-					trc = new I8085Tracer(props, cpu, this, t);
+					trc = new I8085Tracer(props, "vcpm", cpu, this, t);
 				}
 			} else if (s.matches("[zZ]80")) {
 				cpu = new Z80(this);
 				if (t != null) {
-					trc = new Z80Tracer(props, cpu, this, t);
+					trc = new Z80Tracer(props, "vcpm", cpu, this, t);
 				}
 			} else if (s.matches("[zZ]180")) {
 				Z180 z180 = new Z180(this, null, true); // Z80S180
 				cpu = z180;
 				if (t != null) {
-					trc = new Z180Tracer(props, cpu, this, t);
+					trc = new Z180Tracer(props, "vcpm", cpu, this, t);
 				}
 			}
 		}
 		if (cpu == null) {
 			cpu = new Z80(this);
 			if (t != null) {
-				trc = new Z80Tracer(props, cpu, this, t);
+				trc = new Z80Tracer(props, "vcpm", cpu, this, t);
 			}
 		}
 		s = props.getProperty("vcpm_dump");
@@ -1495,7 +1495,7 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 				}
 				clk = cpu.execute();
 				if (tracing) {
-					trc.postTrace(PC, clk);
+					trc.postTrace(PC, clk, null);
 				}
 				clock += clk;
 			}
