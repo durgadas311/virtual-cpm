@@ -1,0 +1,72 @@
+128CTL-C Struck
+129CTL-B Struck
+130Data Exhausted
+131Attempted Divide by Zero
+132Illegal Number Value
+133Illegal Usage
+134Data Lock Engaged
+135Cant Find Variable Mentioned in NEXT Statement
+136Floating Point Overflow (Number too Large)
+137No Corresponding GOSUB for this RETURN statement
+138String Length Exceeds 256 Characters
+139Illegal or Unknown Statement Number
+140Syntax Error
+141Type Conflict (Illegal Mix of String and Number Values)
+142Out of RAM Space
+143Subscript Out of Range
+144Too Many or Too Few Subscripts Supplied
+145This Array Was Not Dimensioned
+146An Illegal Character Was Encountered
+147Undefined Function
+148End
+149Stop
+150File Already Exists
+151Illegal Format for File Name
+152Too Many or Too Few Arguments Specified
+153File is not Open
+154Warning--Line Length Too Long, excess ignored.
+155Channel is Currently in Use
+000HEATH HDOS Issue #50.06.00  03-Nov-80
+001?02 End of File
+002?02 No Free Space on Media
+003?02 Illegal 'SYSCALL' Function Code
+004?02 Channel is Already in Use
+005?02 Device is Not Capable of This Operation
+006?02 Illegal Format for Device Name
+007?02 Illegal Format for File Name
+008?02 Not Enough Memory for the Device Driver
+009?02 Channel is not Open
+010?02 Illegal Function Request
+011?02 File Usage Conflicts
+012?02 File Cannot Be Located
+013?02 Unknown Device Name
+014?02 Illegal Channel Number
+015?02 The Volume Directory is Full
+016?02 The File's Contents are not Correct for This Operation
+017?02 Not Enough RAM for this Program
+018?02 Read Failure on the Device
+019?02 Write Failure on the Device
+020?02 Attempted Write Protection Violation
+021?02 Disk is Write Protected
+022?02 The File is Already Present
+023?02 Aborted by Device Driver
+024?02 File is Locked Against Flag Change
+025?02 A File is Already Open
+026?02 Illegal or Unknown Switch Specified
+027?02 Unknown Unit for this Device
+028?02 Non-null File Name is Required
+029?02 Device is incapable of write operations (or is write locked)
+030?02 Unit Not Available
+031?02 Illegal Value
+032?02 Illegal Option
+033?02 Volume Presently Mounted on the Device
+034?02 No Volume Presently Mounted on the Device
+035?02 File Open on the Device
+036?02 No Provisions Made for Remounting More Disks
+037?02 This Disk must be Initialized before it can be Mounted
+038?02 Unable to Read this Disk, It Probably has not been Properly Initialized
+039?02 Disk Structure is Corrupt.  Contact Technical Correspondence for Help.
+040?02 Not the Correct Version of HDOS for this program.
+041?02 No Operating System Mounted, Required for this Operation.
+042?02 Illegal Overlay Index.
+043?02 Overlay Too Large.
