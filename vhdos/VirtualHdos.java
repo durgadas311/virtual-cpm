@@ -76,7 +76,6 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private HdosOpenFile[] chans;
 	private String[] dirs;
 	private String root;
-//	private HostFileBdos hfb;
 	private BufferedReader lin;
 
 	static final int hdosv = 0x0038; // the ONLY entry?
@@ -511,39 +510,62 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	// from filename and (optional) default block.
 	// The device and type (extension) are only guaranteed
 	// if def is provided.
-	private String hdosFileName(int def, int fs) {
+	private int hdosDecodeName(int def, int fs, int dst) {
 		int x;
-		String fn = "";
 		int c;
-		if ((mem[fs + 3] & 0x7f) != ':' && def >= 0) {
-			for (x = 0; x < 3; ++x) {
-				c = mem[def + x] & 0x7f;
-				fn += Character.toUpperCase((char)c);
+		int i = dst;	// ptr in dst
+		int j = 0;	// ptr in fs
+		mem[i++] = (byte)0x00;	// Start out with error
+		if ((mem[fs + 3] & 0x7f) != ':') {
+			if (def >= 0 && mem[def] != 0) {
+				for (x = 0; x < 3; ++x) {
+					c = mem[def + x] & 0x7f;
+					mem[i++] = (byte)Character.toUpperCase((char)c);
+				}
+			} else {
+				mem[i++] = 0; //'S';
+				mem[i++] = 0; //'Y';
+				mem[i++] = 0; //'0';
 			}
-			fn += ':';
+		} else {
+			for (j = 0; j < 3; ++j) {
+				c = mem[fs + j] & 0x7f;
+				mem[i++] = (byte)Character.toUpperCase((char)c);
+			}
+			++j;	// skip ':'
 		}
+		if (mem[dst + 1] == 0) {
+			return EC_ICN;
+		}
+		int dx = hdosDrive(new String(mem, dst + 1, 3).toLowerCase());
+		if (dx < 0) return EC_IDN;
+		mem[i - 1] = (byte)(mem[i - 1] - '0');
 		c = 0;
 		for (x = 0; x < 8; ++x) {
-			c = mem[fs + x] & 0x7f;
+			c = mem[fs + j++] & 0x7f;
 			if (c == '.' || delimiter(c)) break;
-			fn += Character.toUpperCase((char)c);
+			mem[i++] = (byte)Character.toUpperCase((char)c);
 		}
+		while (i < dst + 12) mem[i++] = 0;
 		if (c == '.') {
-			// x still points to '.'
-			for (; x < 12; ++x) {
-				c = mem[fs + x] & 0x7f;
+			for (x = 0; x < 3; ++x) {
+				c = mem[fs + j++] & 0x7f;
 				if (delimiter(c)) break;
-				fn += Character.toUpperCase((char)c);
+				mem[i++] = (byte)Character.toUpperCase((char)c);
 			}
-		} else if (def >= 0) {
-			fn += '.';
+		} else if (def >= 0 && mem[def + 3] != 0) {
 			for (x = 0; x < 3; ++x) {
 				c = mem[def + 3 + x] & 0x7f;
 				if (delimiter(c)) break;
-				fn += Character.toUpperCase((char)c);
+				mem[i++] = (byte)Character.toUpperCase((char)c);
 			}
 		}
-		return fn;
+		while (i < dst + 15) {
+			mem[i++] = 0;
+		}
+		// TODO: AIO.DTA...
+		mem[dst] = (byte)0x01;	// TODO: AIO.FLG - valid device/file
+		return EC_OK;
 	}
 
 	private void doCCP(String[] argv) {
@@ -921,9 +943,8 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		int de = cpu.getRegDE();
 		int bc = cpu.getRegBC();
 
-		String fn = hdosFileName(de, hl);
-		System.arraycopy(fn.getBytes(), 0, mem, bc, fn.length());
-		error(EC_OK);
+		int ec = hdosDecodeName(de, hl, bc);
+		error(ec);
 	}
 
 	private void doCLEAR() {
@@ -1101,6 +1122,10 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			doCCP(cmd); // parse command... setup execution...
 			while (running) {
 				int PC = cpu.getRegPC();
+				// Doing this early allows triggering off OS calls
+				if (trc != null) {
+					tracing = trc.preTrace(PC, clock);
+				}
 				if (PC == hdosv) {
 					hdosTrap(PC);
 					if (!running) {
@@ -1113,10 +1138,6 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 					running = false;
 					break;
 				}
-				// TODO: how to trace osTrap...
-				if (trc != null) {
-					tracing = trc.preTrace(PC, clock);
-				}
 				clk = cpu.execute();
 				if (tracing) {
 					trc.postTrace(PC, clk, null);
@@ -1128,6 +1149,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		stopped = true;
 		stopWait.release();
 		System.out.format("\n");
+		// System.exit(exitCode);
 	}
 
 	public String dumpDebug() {

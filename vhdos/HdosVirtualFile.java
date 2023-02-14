@@ -26,7 +26,7 @@ public class HdosVirtualFile extends HdosOpenFile {
 			fd = new RandomAccessFile(file, rw);
 			closedf = false;
 		} catch (Exception ee) {
-			System.err.format("open: %s\n", ee.getMessage());
+			//System.err.format("open: %s\n", ee.getMessage());
 			return false;
 		}
 		return true;
