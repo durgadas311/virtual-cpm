@@ -17,4 +17,5 @@ public abstract class HdosOpenFile {
 	public abstract int write(byte[] dat, int off, int cnt);
 	public abstract boolean seek(int pos);
 	public abstract int length();
+	public abstract boolean closed();
 }

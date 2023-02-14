@@ -5,6 +5,7 @@ import java.io.*;
 public class HdosVirtualFile extends HdosOpenFile {
 	private RandomAccessFile fd;
 	private String rw;
+	private boolean closedf = true;
 
 	public HdosVirtualFile(File path, int fnc) {
 		super(path, fnc);
@@ -23,6 +24,7 @@ public class HdosVirtualFile extends HdosOpenFile {
 	public boolean open() {
 		try {
 			fd = new RandomAccessFile(file, rw);
+			closedf = false;
 		} catch (Exception ee) {
 			System.err.format("open: %s\n", ee.getMessage());
 			return false;
@@ -33,6 +35,7 @@ public class HdosVirtualFile extends HdosOpenFile {
 	public boolean close() {
 		try {
 			fd.close();
+			closedf = true;
 		} catch (Exception ee) {
 			// ee.getMessage()
 			return false;
@@ -79,5 +82,9 @@ public class HdosVirtualFile extends HdosOpenFile {
 			// ee.getMessage()
 			return 0;
 		}
+	}
+
+	public boolean closed() {
+		return closedf;
 	}
 }

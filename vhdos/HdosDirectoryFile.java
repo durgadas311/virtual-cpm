@@ -118,4 +118,8 @@ public class HdosDirectoryFile extends HdosOpenFile {
 	public int length() {
 		return dir.length;
 	}
+
+	public boolean closed() {
+		return (dir == null);
+	}
 }

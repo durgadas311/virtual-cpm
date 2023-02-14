@@ -494,7 +494,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	}
 
 	private int loadABS(File path) {
-		if (chans[0] != null) {
+		if (chans[0] != null && !chans[0].closed()) {
 			// TODO: close channel...
 			chans[0] = null;
 		}
@@ -632,19 +632,25 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		cpu.setRegHL(hl);
 	}
 
-	private int getChannel(boolean empty) {
+	private int getChannel() {
 		int ch = (cpu.getRegA() + 1) & 0xff; // -1..5 typical
 		if (ch >= chans.length) {
 			cpu.setRegA(EC_ILC);
 			cpu.setCarryFlag(true);
 			return -1;
 		}
-		if (!empty && chans[ch] == null) {
+		return ch;
+	}
+
+	private int getChannel(boolean empty) {
+		int ch = getChannel();
+		if (ch < 0) return -1;
+		if (!empty && (chans[ch] == null || chans[ch].closed())) {
 			cpu.setRegA(EC_FNO);
 			cpu.setCarryFlag(true);
 			return -1;
 		}
-		if (empty && chans[ch] != null) {
+		if (empty && chans[ch] != null && !chans[ch].closed()) {
 			cpu.setRegA(EC_CNA);
 			cpu.setCarryFlag(true);
 			return -1;
@@ -669,7 +675,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private boolean checkOpens(File path, int fnc) {
 		int x;
 		for (x = 0; x < chans.length; ++x) {
-			if (chans[x] == null) continue;
+			if (chans[x] == null || chans[x].closed()) continue;
 			if (!path.equals(chans[x].file)) continue;
 			if (chans[x].mode != 042) return false;
 			if (fnc != 042) return false;
@@ -747,7 +753,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	}
 
 	private void doNAME() {
-		int ch = getChannel(false);
+		int ch = getChannel();
 		if (ch < 0) return;
 		int de = cpu.getRegDE();
 		int hl = cpu.getRegHL();
@@ -810,7 +816,6 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		int ch = getChannel(false);
 		if (ch < 0) return;
 		chans[ch].close();
-		chans[ch] = null;
 		error(EC_OK);
 	}
 
