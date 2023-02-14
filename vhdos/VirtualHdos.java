@@ -85,20 +85,11 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	static final int memtop = 0xff00; // or ????
 	static final int hdose = memtop - 256; // or ????
 
-	private int defcmd = memtop + 16;
+	private int intvec = memtop + 16;
 
 	private static VirtualHdos vhdos;
 	private static String coredump = null;
 	private int exitCode = 0; // TODO: System.exit(exitCode)
-
-	class HdosDefault {
-		String dev;
-		String ext;
-		public HdosDefault(int def) {
-			dev = new String(mem, def, 3);
-			ext = new String(mem, def + 3, 3);
-		}
-	}
 
 	public static void main(String[] argv) {
 		Properties props = new Properties();
@@ -128,13 +119,13 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 				++x;
 			}
 		}
-		for (int x = 0; x < 16; ++x) {
-			String v = String.format("HDOSDrive_%c", (char)('A' + x));
+		for (int x = 0; x < 8; ++x) {
+			String v = String.format("HDOSDrive_%s", devs[x]);
 			s = System.getenv(v);
 			if (s == null || s.length() == 0) {
 				continue;
 			}
-			String p = String.format("vhdos_drive_%c", (char)('a' + x));
+			String p = String.format("vhdos_drive_%s", devs[x]);
 			props.setProperty(p, s.trim());
 		}
 		s = System.getenv("VHDOSCoreDump");
@@ -222,6 +213,32 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			ee.printStackTrace();
 			System.exit(1);
 		}
+		// Do H17 init...
+		System.arraycopy(mem, 0x1f5a, mem, 0x2048, 88);
+		Arrays.fill(mem, 0x20a0, 0x20be, (byte)0);
+		setJMP(0x201f, intvec);
+		setJMP(0x2022, intvec);
+		setJMP(0x2025, intvec);
+		setJMP(0x2028, intvec);
+		setJMP(0x202b, intvec);
+		setJMP(0x202e, intvec);
+		setJMP(0x2031, intvec);
+		//
+		setJMP(0x0008, 0x201f);
+		setJMP(0x0010, 0x2022);
+		setJMP(0x0018, 0x2025);
+		setJMP(0x0020, 0x2028);
+		setJMP(0x0028, 0x202b);
+		setJMP(0x0030, 0x202e);
+		setJMP(0x0038, 0x2031);
+		// ... not sure who is responsible for these...
+		// setJMP(0x2108, sysvec++);	// S.SDD
+		// setJMP(0x210b, sysvec++);	// S.FATSERR
+		// setJMP(0x210e, sysvec++);	// S.DIREAD
+		// setJMP(0x2111, sysvec++);	// S.FCI
+		// setJMP(0x2114, sysvec++);	// S.SCI
+		// setJMP(0x2117, sysvec++);	// S.GUP
+
 		lin = new BufferedReader(new InputStreamReader(System.in));
 		for (x = 0; x < dirs.length; ++x) {
 			s = String.format("vhdos_drive_%s", hdosDevice(x));
@@ -246,7 +263,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			if (dirs[x] != null) continue;
 			dirs[x] = String.format("%s/%s", root, devs[x]);
 		}
-		s = System.getenv("HDOSShow");
+		s = System.getenv("VHDOSShow");
 		if (s != null && s.length() == 3) {
 			int dx = hdosDrive(s);
 			if (dx >= 0) {
@@ -1062,13 +1079,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 
 	private void warmStart() {
 		// TODO: close all? ???
-		setJMP(hdosv, hdose);
-		mem[defcmd] = 'S';
-		mem[defcmd] = 'Y';
-		mem[defcmd] = '0';
-		mem[defcmd] = 'A';
-		mem[defcmd] = 'B';
-		mem[defcmd] = 'S';
+		//setJMP(hdosv, hdose);
 	}
 
 	//////// Runnable /////////
