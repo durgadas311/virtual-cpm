@@ -20,7 +20,7 @@ public class HdosDirectoryFile extends HdosOpenFile {
 			if (l[e].startsWith(".")) continue;
 			t = l[e].indexOf('.');
 			if (t > 8) continue;
-			if (t > 0 && l[e].length() - t > 3) continue;
+			if (t > 0 && l[e].length() - t > 4) continue;
 			if (!l[e].equals(l[e].toLowerCase())) continue;
 			// TODO: more sanity checks
 			break;
@@ -49,6 +49,19 @@ public class HdosDirectoryFile extends HdosOpenFile {
 		}
 		// TODO: date stamps? fake size info?
 		return e;
+	}
+
+	private void hexDump(byte[] buf, int adr, int len) {
+		int x;
+		while (len > 0) {
+			System.err.format("%04x:", adr);
+			for (x = 0; x < 16 && x < len; ++x) {
+				System.err.format(" %02x", buf[adr + x] & 0xff);
+			}
+			System.err.format("\n");
+			adr += 16;
+			len -= 16;
+		}
 	}
 
 	public boolean open() {

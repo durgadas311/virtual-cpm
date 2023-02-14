@@ -407,8 +407,9 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			s += ' ';
 			s += argv[x].toUpperCase();
 		}
-		sp -= s.length();
+		mem[--sp] = (byte)0;	// always NUL-terminated
 		if (s.length() > 0) {
+			sp -= s.length();
 			System.arraycopy(s.getBytes(), 0, mem, sp, s.length());
 		}
 		cpu.setRegSP(sp);
@@ -696,7 +697,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		while (len > 0) {
 			System.err.format("%04x:", adr);
 			for (x = 0; x < 16 && x < len; ++x) {
-				System.err.format(" %02x", mem[adr + x]);
+				System.err.format(" %02x", mem[adr + x] & 0xff);
 			}
 			System.err.format("\n");
 			adr += 16;
