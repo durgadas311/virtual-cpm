@@ -1,0 +1,14 @@
+vhdos asm sy2:demo,sy2:demo=sy2:demo,sy1:/err
+>asm sy2:demo,sy2:demo=sy2:demo,sy1:/err
+
+
+00160 Statements Assembled
+47375 Bytes Free
+ No Errors Detected
+
+
+vhdos sy2:demo
+>sy2:demo
+
+HI THERE, SPORTS FANS!
+YOUR SYSTEM WORKS FINE!

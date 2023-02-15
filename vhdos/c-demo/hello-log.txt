@@ -1,0 +1,21 @@
+vhdos c -m1 dk0:hello
+>c -m1 dk0:hello
+
+C/80 Compiler 3.1 (4/11/84) - (c) 1984 The Software Toolworks
+
+0 errors in compilation
+12K bytes free
+
+vhdos m80 =dk0:hello
+>m80 =dk0:hello
+
+No  Fatal error(s)
+
+vhdos l80 dk0:hello,sy0:clibrary/s,dk0:hello/n/e
+>l80 dk0:hello,sy0:clibrary/s,dk0:hello/n/e
+[2421	27DD]
+
+vhdos dk0:hello
+>dk0:hello
+Hello, World!
+

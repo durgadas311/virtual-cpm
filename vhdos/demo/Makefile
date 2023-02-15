@@ -9,7 +9,7 @@ export HDOSDrive_sy2 = $(PWD)
 all: demo.abs
 
 clobber:
-	rm -f *.abs
+	rm -f *.abs *.lst
 
 %.abs: %.asm
 	vhdos $(ASM) sy2:$*,sy2:$*=sy2:$*,sy1:/err

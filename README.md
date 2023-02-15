@@ -12,6 +12,8 @@ Note that it should not ordinarily be necessary to rebuild
 this project. The existing JAR file "bin/VirtualCpm.jar"
 should be up-to-date and may be used as-is.
 
+There also is an [HDOS equivalent](vhdos/README.md).
+
 Building this project requires another project
 [z80cpu](https://github.com/durgadas311/z80cpu).
 The minimum required is to create a subdirectory
