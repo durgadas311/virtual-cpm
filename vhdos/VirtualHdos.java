@@ -96,6 +96,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private int intvec = memtop + 16;
 
 	private boolean nosys;
+	private boolean y2k;
 
 	private static VirtualHdos vhdos;
 	private static String coredump = null;
@@ -214,6 +215,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			System.err.format("Using CPU %s\n", cpu.getClass().getName());
 		}
 		nosys = (props.getProperty("vhdos_nosys") != null);
+		y2k = (props.getProperty("vhdos_y2k") != null);
 
 		try {
 			String rom = "2716_444-19_H17.rom";
@@ -606,7 +608,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			return;
 		}
 		File dir = new File(dirs[dx]);
-		HdosDirectoryFile of = new HdosDirectoryFile(dir, 042, nosys);
+		HdosDirectoryFile of = new HdosDirectoryFile(dir, 042, nosys, y2k);
 		if (!of.open()) return;
 		byte[] buf = new byte[512];
 		String fn, fx;
@@ -925,7 +927,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 		HdosOpenFile of;
 		if (path.getName().equals("direct.sys")) {
-			of = new HdosDirectoryFile(path.getParentFile(), fnc, nosys);
+			of = new HdosDirectoryFile(path.getParentFile(), fnc, nosys, y2k);
 		} else {
 			of = new HdosVirtualFile(path, fnc);
 		}

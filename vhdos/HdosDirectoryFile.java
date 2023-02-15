@@ -17,10 +17,13 @@ public class HdosDirectoryFile extends HdosOpenFile {
 	private byte[] dir;
 	private int pos;
 	private boolean nosys;
+	private boolean y2k;
 
-	public HdosDirectoryFile(File path, int fnc, boolean nosys) {
+	public HdosDirectoryFile(File path, int fnc,
+			boolean nosys, boolean y2k) {
 		super(path, fnc);
 		this.nosys = nosys;
+		this.y2k = y2k;
 		// assert(fnc == 042);
 		// assert(path.isDirectory());
 		pos = 0;
@@ -35,7 +38,7 @@ public class HdosDirectoryFile extends HdosOpenFile {
 			long tm = attr.lastModifiedTime().toMillis();
 			cal.setTimeInMillis(tm);
 			int yr = cal.get(Calendar.YEAR);
-			if (yr > 1999) yr = 1999; // HACK!
+			if (!y2k && yr > 1999) yr = 1999; // HACK!
 			int dt = cal.get(Calendar.DAY_OF_MONTH) |
 				((cal.get(Calendar.MONTH) + 1) << 5) |
 				((yr - 1970) << 9);
