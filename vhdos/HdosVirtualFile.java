@@ -33,6 +33,7 @@ public class HdosVirtualFile extends HdosOpenFile {
 	}
 
 	public boolean close() {
+		if (closedf) return true;
 		try {
 			fd.close();
 			closedf = true;

@@ -15,47 +15,52 @@ import z80debug.*;
 public class VirtualHdos implements Computer, Memory, Runnable {
 	static final int EC_OK = 0;	// no error
 	static final int EC_EOF = 1;	// EOF
-	static final int EC_ILC = 2;	// illegal syscall
-	static final int EC_CNA = 3;	// channel not available
-	static final int EC_DNS = 4;	// device not suitable
-	static final int EC_IDN = 5;	// illegal device name
-	static final int EC_IFN = 6;	// illegal file name
-	static final int EC_NRD = 7;	// no room for device driver
-	static final int EC_FNO = 8;	// channel not open
-	static final int EC_ILR = 9;	// illegal request
-	static final int EC_FUC = 10;	// file usage conflict
-	static final int EC_FNF = 11;	// file not found
-	static final int EC_UND = 12;	// unknown device
-	static final int EC_ICN = 13;	// illegal channel number
-	static final int EC_DIF = 14;	// directory full
-	static final int EC_IFC = 15;	// illegal file contents
-	static final int EC_NEM = 16;	// not enough memory
-	static final int EC_RF = 17;	// read failure
-	static final int EC_WF = 18;	// write failure
-	static final int EC_WPV = 19;	// write prot violation
-	static final int EC_WP = 20;	// disk write prot
-	static final int EC_FAP = 21;	// file already present
-	static final int EC_DDA = 22;	// device driver abort
-	static final int EC_FL = 23;	// file locked
-	static final int EC_FAO = 24;	// file already open
-	static final int EC_IS = 25;	// illegal switch
-	static final int EC_UUN = 26;	// unknown unit number
-	static final int EC_FNR = 27;	// file name rquired
-	static final int EC_DIW = 28;	// device not writeable
-	static final int EC_UNA = 29;	// unit not available
-	static final int EC_ILV = 30;	// illegal value
-	static final int EC_ILO = 31;	// illegal option
-	static final int EC_VPM = 32;	// volume presently mounted
-	static final int EC_NVM = 33;	// no volume presently mounted
-	static final int EC_FOD = 34;	// file open on device
-	static final int EC_NPM = 35;	// no prov made for mounting
-	static final int EC_DNI = 36;	// disk not initialized
-	static final int EC_DNR = 37;	// disk not readable
-	static final int EC_DSC = 38;	// disk structure corrupt
-	static final int EC_NCV = 39;	// not correct version of HDOS
-	static final int EC_NOS = 40;	// no OS mounted
-	static final int EC_IOI = 41;	// illegal overlay index
-	static final int EC_OTL = 42;	// overlay too large
+	static final int EC_EOM = 2;	// End Of Media
+	static final int EC_ILC = 3;	// illegal syscall
+	static final int EC_CNA = 4;	// channel not available
+	static final int EC_DNS = 5;	// device not suitable
+	static final int EC_IDN = 6;	// illegal device name
+	static final int EC_IFN = 7;	// illegal file name
+	static final int EC_NRD = 8;	// no room for device driver
+	static final int EC_FNO = 9;	// channel not open
+	static final int EC_ILR = 10;	// illegal request
+	static final int EC_FUC = 11;	// file usage conflict
+	static final int EC_FNF = 12;	// file not found
+	static final int EC_UND = 13;	// unknown device
+	static final int EC_ICN = 14;	// illegal channel number
+	static final int EC_DIF = 15;	// directory full
+	static final int EC_IFC = 16;	// illegal file contents
+	static final int EC_NEM = 17;	// not enough memory
+	static final int EC_RF = 18;	// read failure
+	static final int EC_WF = 19;	// write failure
+	static final int EC_WPV = 20;	// write prot violation
+	static final int EC_WP = 21;	// disk write prot
+	static final int EC_FAP = 22;	// file already present
+	static final int EC_DDA = 23;	// device driver abort
+	static final int EC_FL = 24;	// file locked
+	static final int EC_FAO = 25;	// file already open
+	static final int EC_IS = 26;	// illegal switch
+	static final int EC_UUN = 27;	// unknown unit number
+	static final int EC_FNR = 28;	// file name rquired
+	static final int EC_DIW = 29;	// device not writeable
+	static final int EC_UNA = 30;	// unit not available
+	static final int EC_ILV = 31;	// illegal value
+	static final int EC_ILO = 32;	// illegal option
+	static final int EC_VPM = 33;	// volume presently mounted
+	static final int EC_NVM = 34;	// no volume presently mounted
+	static final int EC_FOD = 35;	// file open on device
+	static final int EC_NPM = 36;	// no prov made for mounting
+	static final int EC_DNI = 37;	// disk not initialized
+	static final int EC_DNR = 38;	// disk not readable
+	static final int EC_DSC = 39;	// disk structure corrupt
+	static final int EC_NCV = 40;	// not correct version of HDOS
+	static final int EC_NOS = 41;	// no OS mounted
+	static final int EC_IOI = 42;	// illegal overlay index
+	static final int EC_OTL = 43;	// overlay too large
+
+	static final int DIF_SYS = 0x80;	// File.canExecute()
+	static final int DIF_LOC = 0x40;	// not supported
+	static final int DIF_WP = 0x20;		// File.canWrite()
 
 	static final String[] devs = {
 		"sy0", "sy1", "sy2", "sy3",
@@ -72,6 +77,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private Semaphore stopWait;
 	private ReentrantLock cpuLock;
 	private Vector<String[]> cmds;
+	private Map<Integer, String> errv;
 
 	private HdosOpenFile[] chans;
 	private String[] dirs;
@@ -85,6 +91,8 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	static final int hdose = memtop - 256; // or ????
 
 	private int intvec = memtop + 16;
+
+	private boolean nosys;
 
 	private static VirtualHdos vhdos;
 	private static String coredump = null;
@@ -202,6 +210,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		if (!silent) {
 			System.err.format("Using CPU %s\n", cpu.getClass().getName());
 		}
+		nosys = (props.getProperty("vhdos_nosys") != null);
 
 		try {
 			String rom = "2716_444-19_H17.rom";
@@ -535,7 +544,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			++j;	// skip ':'
 		}
 		if (mem[dst + 1] == 0) {
-			return EC_ICN;
+			return EC_UND;
 		}
 		int dx = hdosDrive(new String(mem, dst + 1, 3).toLowerCase());
 		if (dx < 0) return EC_IDN;
@@ -791,11 +800,11 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 		Arrays.fill(mem, de, de + 6, (byte)0);
 		Arrays.fill(mem, hl, hl + 9, (byte)0);
-		System.arraycopy(devs[x].getBytes(), 0, mem, de, 3);
-		for (x = 0; x < 8 && fn[x] != '.'; ++x) {
+		System.arraycopy(devs[x].toUpperCase().getBytes(), 0, mem, de, 3);
+		for (x = 0; x < 8 && x < fn.length && fn[x] != '.'; ++x) {
 			mem[hl + x] = (byte)Character.toUpperCase(fn[x]);
 		}
-		if (fn[x++] != '.') return;
+		if (x >= fn.length || fn[x++] != '.') return; // error? not possible?
 		for (y = 0; y < 3 && x < fn.length; ++y) {
 			mem[de + 3 + y] = (byte)Character.toUpperCase(fn[x++]);
 		}
@@ -804,6 +813,36 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private void error(int ec) {
 		cpu.setRegA(ec);
 		cpu.setCarryFlag(ec != EC_OK);
+	}
+
+	private void doCHFLG() {
+		int ec = EC_OK;
+		int b = cpu.getRegB();
+		int c = cpu.getRegC();
+		int de = cpu.getRegDE();
+		int hl = cpu.getRegHL();
+		File path = mkFilePath(de, hl);
+		if (path == null) {
+			error(EC_IFN);
+			return;
+		}
+		if (!path.exists()) {
+			error(EC_FNF);
+			return;
+		}
+		int cur = 0;
+		if (!path.canWrite()) cur |= DIF_WP;
+		if (!nosys && path.canExecute()) cur |= DIF_SYS;
+		int nuw = (cur & ~c) | b;
+		int dif = nuw ^ cur;
+		if (!nosys && (dif & DIF_SYS) != 0 &&
+			!path.setExecutable((nuw & DIF_SYS) != 0)) {
+			ec = EC_DSC;
+		}
+		if ((dif & DIF_WP) != 0 && !path.setWritable((nuw & DIF_WP) == 0)) {
+			ec = EC_DSC;
+		}
+		error(ec);
 	}
 
 	private void doOPEN(int fnc) {
@@ -822,12 +861,12 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 		HdosOpenFile of;
 		if (path.getName().equals("direct.sys")) {
-			of = new HdosDirectoryFile(path.getParentFile(), fnc);
+			of = new HdosDirectoryFile(path.getParentFile(), fnc, nosys);
 		} else {
 			of = new HdosVirtualFile(path, fnc);
 		}
 		if (!of.open()) {
-			error(EC_FUC);
+			error(EC_FNF);
 			return;
 		}
 		chans[ch] = of;
@@ -948,13 +987,45 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	}
 
 	private void doCLEAR() {
+		int ch = getChannel();
+		if (ch < 0) return;
+		if (chans[ch] != null) chans[ch].close();
+		error(EC_OK);
 	}
 	private void doCLEARA() {
+		int x;
+		for (x = 0; x < chans.length; ++x) {
+			if (chans[x] != null) chans[x].close();
+		}
+		error(EC_OK);
 	}
 	private void doERROR() {
 		int a = cpu.getRegA();
 		int h = cpu.getRegH();
-		System.out.format(" %02d%c", a, h);
+		if (loadERRORs() && errv.containsKey(a)) {
+			System.out.format(" %s%c", errv.get(a), h);
+		} else {
+			System.out.format(" Error-%02d%c", a, h);
+		}
+	}
+
+	private boolean loadERRORs() {
+		if (errv != null) return true;
+		errv = new HashMap<Integer, String>();
+		try {
+			InputStream fi = this.getClass().getResourceAsStream("errormsg.sys");
+			BufferedReader lin = new BufferedReader(new InputStreamReader(fi));
+			String s;
+			while ((s = lin.readLine()) != null) {
+				int ec = Integer.valueOf(s.substring(0, 3));
+				errv.put(ec, s.substring(3));
+			}
+			lin.close();
+			return true;
+		} catch (Exception ee) {
+			//ee.printStackTrace();
+			return false;
+		}
 	}
 
 	private void hdosTrap(int pc) {
@@ -1051,7 +1122,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			break;
 		case 060:	// .CHFLG - change flags
 			// no need? not supported
-			error(EC_OK);
+			doCHFLG();
 			break;
 		case 061:	// .DISMT
 			// no need? not supported

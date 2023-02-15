@@ -3,11 +3,17 @@
 import java.io.*;
 
 public class HdosDirectoryFile extends HdosOpenFile {
+	static final int DIF_SYS = 0x80;
+	static final int DIF_LOC = 0x40;
+	static final int DIF_WP = 0x20;
+
 	private byte[] dir;
 	private int pos;
+	private boolean nosys;
 
-	public HdosDirectoryFile(File path, int fnc) {
+	public HdosDirectoryFile(File path, int fnc, boolean nosys) {
 		super(path, fnc);
+		this.nosys = nosys;
 		// assert(fnc == 042);
 		// assert(path.isDirectory());
 		pos = 0;
@@ -47,6 +53,11 @@ public class HdosDirectoryFile extends HdosOpenFile {
 		while (x < 11) {
 			dir[ent + x++] = 0;
 		}
+		File f = new File(file, l[e]);
+		int flg = 0;
+		if (!f.canWrite()) flg |= DIF_WP;
+		if (!nosys && !f.canExecute()) flg |= DIF_SYS;
+		dir[ent + 14] = (byte)flg;
 		// TODO: date stamps? fake size info?
 		return e;
 	}
