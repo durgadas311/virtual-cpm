@@ -95,19 +95,6 @@ public class HdosDirectoryFile extends HdosOpenFile {
 		return e;
 	}
 
-	private void hexDump(byte[] buf, int adr, int len) {
-		int x;
-		while (len > 0) {
-			System.err.format("%04x:", adr);
-			for (x = 0; x < 16 && x < len; ++x) {
-				System.err.format(" %02x", buf[adr + x] & 0xff);
-			}
-			System.err.format("\n");
-			adr += 16;
-			len -= 16;
-		}
-	}
-
 	public boolean open() {
 		int x, y;
 		String[] l = file.list();

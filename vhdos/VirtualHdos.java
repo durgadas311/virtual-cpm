@@ -591,6 +591,25 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		return String.format("%02d-%s-%04d", da, months[mo], yr);
 	}
 
+	private void doTYPE(String[] argv) {
+		if (argv.length < 2) {
+			return;
+		}
+		File tf = mkFilePath(argv[1]);
+		HdosOpenFile of = new HdosVirtualFile(tf, 042);
+		if (!of.open()) {
+			System.out.format("%s?\n", argv[1]);
+			return;
+		}
+		byte[] buf = new byte[256];
+		while (of.read(buf, 0, buf.length) > 0) {
+			// TODO: '\0' is EOF or just gobbled?
+			try { System.out.write(buf); } catch (Exception ee) {}
+		}
+		of.close();
+		System.out.format("\n");
+	}
+
 	private void doDIR(String[] argv) {
 		// TODO: file matching...
 		int x;
@@ -633,6 +652,8 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private boolean ccpBuiltin(String cmd, String[] argv) {
 		if (cmd.equals("dir")) {
 			doDIR(argv);
+		} else if (cmd.equals("type")) {
+			doTYPE(argv);
 		} else {
 			return false;
 		}
@@ -796,11 +817,21 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	}
 
 	private void hexDump(int adr, int len) {
+		hexDump(mem, adr, len);
+	}
+
+	static public void hexDump(byte[] buf, int adr, int len) {
 		int x;
 		while (len > 0) {
 			System.err.format("%04x:", adr);
 			for (x = 0; x < 16 && x < len; ++x) {
-				System.err.format(" %02x", mem[adr + x] & 0xff);
+				System.err.format(" %02x", buf[adr + x] & 0xff);
+			}
+			System.err.format("  ");
+			for (x = 0; x < 16 && x < len; ++x) {
+				char c = (char)(buf[adr + x] & 0xff);
+				if (c < ' ' || c > '~') c = '.';
+				System.err.format("%c", c);
 			}
 			System.err.format("\n");
 			adr += 16;

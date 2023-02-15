@@ -1,5 +1,6 @@
 // Copyright 2023 Douglas Miller <durgadas311@gmail.com>
 
+import java.util.Arrays;
 import java.io.*;
 
 public class HdosVirtualFile extends HdosOpenFile {
@@ -47,7 +48,13 @@ public class HdosVirtualFile extends HdosOpenFile {
 	public int read(byte[] dat, int off, int cnt) {
 		try {
 			int n = fd.read(dat, off, cnt);
-			return n;
+			if (n < 0) {
+				return n;
+			}
+			if (n < cnt) {
+				Arrays.fill(dat, off + n, off + cnt, (byte)0x00);
+			}
+			return cnt;
 		} catch (Exception ee) {
 			// ee.getMessage()
 			return -1;
