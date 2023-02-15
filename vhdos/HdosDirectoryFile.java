@@ -56,8 +56,11 @@ public class HdosDirectoryFile extends HdosOpenFile {
 		File f = new File(file, l[e]);
 		int flg = 0;
 		if (!f.canWrite()) flg |= DIF_WP;
-		if (!nosys && !f.canExecute()) flg |= DIF_SYS;
+		if (!nosys && f.canExecute()) flg |= DIF_SYS;
 		dir[ent + 14] = (byte)flg;
+		int len = (int)((f.length() + 255) / 256);
+		dir[ent + 16] = (byte)len;
+		dir[ent + 17] = (byte)(len >> 8);
 		// TODO: date stamps? fake size info?
 		return e;
 	}

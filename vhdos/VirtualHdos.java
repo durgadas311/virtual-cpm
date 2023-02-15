@@ -577,6 +577,51 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		return EC_OK;
 	}
 
+	private void doDIR(String[] argv) {
+		// TODO: file matching...
+		int x;
+		int dx = -1;
+		byte[] pat = new byte[11];
+		Arrays.fill(pat, (byte)'?');
+		if (argv.length == 1) {
+			dx = 0;
+		} else if (argv[1].matches("sy[0-9]:") ||
+				argv[1].matches("dk[0-9]:")) {
+			dx = hdosDrive(argv[1].substring(0, 3));
+		}
+		if (dx < 0) {
+			System.out.format("?\n");
+			return;
+		}
+		File dir = new File(dirs[dx]);
+		HdosDirectoryFile of = new HdosDirectoryFile(dir, 042, nosys);
+		if (!of.open()) return;
+		byte[] buf = new byte[512];
+		String fn, fx;
+		System.out.format("NAME    .EXT   SIZE   FLAGS\n\n");
+		while (of.read(buf, 0, buf.length) > 0) {
+			for (x = 0; x < 0x1fa; x += 23) {
+				if ((buf[x] & 0xfe) == 0xfe) continue;
+				fn = new String(buf, x, 8).replaceAll("\000", " ");
+				fx = new String(buf, x + 8, 3).replaceAll("\000", " ");
+				dx = getWORD(buf, x + 16);
+				System.out.format("%s.%s   %4d    %c %c\n", fn, fx, dx,
+					(buf[x + 14] & DIF_SYS) != 0 ? 'S' : ' ',
+					(buf[x + 14] & DIF_WP) != 0 ? 'W' : ' ');
+			}
+		}
+		of.close();
+	}
+
+	private boolean ccpBuiltin(String cmd, String[] argv) {
+		if (cmd.equals("dir")) {
+			doDIR(argv);
+		} else {
+			return false;
+		}
+		return true;
+	}
+
 	private void doCCP(String[] argv) {
 		boolean ok = false;
 		int entry = -1;
@@ -602,6 +647,10 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 		System.out.format("%s\n", cmd);
 		cmd = argv[0].toLowerCase();
+		if (ccpBuiltin(cmd, argv)) {
+			running = false;
+			return;
+		}
 		File path = mkFilePath(cmd);
 		if (path == null) {
 			System.out.format("%s?\n", cmd);
