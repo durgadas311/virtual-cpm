@@ -1,6 +1,13 @@
 // Copyright 2023 Douglas Miller <durgadas311@gmail.com>
 
 import java.io.*;
+import java.nio.*;
+import java.nio.channels.FileLock;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.Files;
+import java.nio.file.FileSystems;
+import java.nio.file.Path;
+import java.util.Calendar;
 
 public class HdosDirectoryFile extends HdosOpenFile {
 	static final int DIF_SYS = 0x80;
@@ -17,6 +24,26 @@ public class HdosDirectoryFile extends HdosOpenFile {
 		// assert(fnc == 042);
 		// assert(path.isDirectory());
 		pos = 0;
+	}
+
+	private void setDate(File file, byte[] buf, int off) {
+		try {
+			Calendar cal = Calendar.getInstance();
+			BasicFileAttributes attr;
+			Path path = file.toPath();
+			attr = Files.readAttributes(path, BasicFileAttributes.class);
+			long tm = attr.lastModifiedTime().toMillis();
+			cal.setTimeInMillis(tm);
+			int yr = cal.get(Calendar.YEAR);
+			if (yr > 1999) yr = 1999; // HACK!
+			int dt = cal.get(Calendar.DAY_OF_MONTH) |
+				((cal.get(Calendar.MONTH) + 1) << 5) |
+				((yr - 1970) << 9);
+			buf[off] = (byte)dt;
+			buf[off + 1] = (byte)(dt >> 8);
+		} catch (Exception ee) {
+			return;
+		}
 	}
 
 	private int nextFile(String[] l, int e, int ent) {
@@ -61,7 +88,7 @@ public class HdosDirectoryFile extends HdosOpenFile {
 		int len = (int)((f.length() + 255) / 256);
 		dir[ent + 16] = (byte)len;
 		dir[ent + 17] = (byte)(len >> 8);
-		// TODO: date stamps? fake size info?
+		setDate(f, dir, ent + 19);
 		return e;
 	}
 

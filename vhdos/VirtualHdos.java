@@ -62,6 +62,9 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	static final int DIF_LOC = 0x40;	// not supported
 	static final int DIF_WP = 0x20;		// File.canWrite()
 
+	static final String[] months = { "Jan", "Feb", "Mar", "Apr", "May",
+		"Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
 	static final String[] devs = {
 		"sy0", "sy1", "sy2", "sy3",
 		"dk0", "dk1", "dk2", "dk3",
@@ -577,6 +580,15 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		return EC_OK;
 	}
 
+	private String getDate(byte[] buf, int idx) {
+		int dt = getWORD(buf, idx);
+		if (dt == 0) return "";
+		int da = dt & 0x001f;
+		int mo = ((dt & 0x01e0) >> 5) - 1;
+		int yr = ((dt & 0xfe00) >> 9) + 1970;
+		return String.format("%02d-%s-%04d", da, months[mo], yr);
+	}
+
 	private void doDIR(String[] argv) {
 		// TODO: file matching...
 		int x;
@@ -598,14 +610,17 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		if (!of.open()) return;
 		byte[] buf = new byte[512];
 		String fn, fx;
-		System.out.format("NAME    .EXT   SIZE   FLAGS\n\n");
+		System.out.format("NAME    .EXT   SIZE     DATE     FLAGS\n\n");
 		while (of.read(buf, 0, buf.length) > 0) {
 			for (x = 0; x < 0x1fa; x += 23) {
 				if ((buf[x] & 0xfe) == 0xfe) continue;
 				fn = new String(buf, x, 8).replaceAll("\000", " ");
 				fx = new String(buf, x + 8, 3).replaceAll("\000", " ");
 				dx = getWORD(buf, x + 16);
-				System.out.format("%s.%s   %4d    %c %c\n", fn, fx, dx,
+				System.out.format(
+					"%s.%s   %4d  %11s  %c %c\n",
+					fn, fx, dx,
+					getDate(buf, x + 19),
 					(buf[x + 14] & DIF_SYS) != 0 ? 'S' : ' ',
 					(buf[x + 14] & DIF_WP) != 0 ? 'W' : ' ');
 			}
