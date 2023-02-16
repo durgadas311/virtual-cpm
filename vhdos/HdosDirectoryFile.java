@@ -52,6 +52,7 @@ public class HdosDirectoryFile extends HdosOpenFile {
 	private int nextFile(String[] l, int e, int ent) {
 		int t = 0;
 		int x = 0;
+		File f = null;
 		for (; e < l.length; ++e) {
 			if (l[e].startsWith(".")) continue;
 			t = l[e].indexOf('.');
@@ -59,6 +60,8 @@ public class HdosDirectoryFile extends HdosOpenFile {
 			if (t > 0 && l[e].length() - t > 4) continue;
 			if (!l[e].equals(l[e].toLowerCase())) continue;
 			// TODO: more sanity checks
+			f = new File(file, l[e]);
+			if (f.isDirectory()) continue;
 			break;
 		}
 		if (e >= l.length) return -1;
@@ -83,7 +86,6 @@ public class HdosDirectoryFile extends HdosOpenFile {
 		while (x < 11) {
 			dir[ent + x++] = 0;
 		}
-		File f = new File(file, l[e]);
 		int flg = 0;
 		if (!f.canWrite()) flg |= DIF_WP;
 		if (!nosys && f.canExecute()) flg |= DIF_SYS;

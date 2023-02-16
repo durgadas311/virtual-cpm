@@ -13,6 +13,8 @@ import z80core.*;
 import z80debug.*;
 
 public class VirtualHdos implements Computer, Memory, Runnable {
+	static final int NCHAN = 8;	// HDOS supports -1, 0, .. 5
+
 	static final int EC_OK = 0;	// no error
 	static final int EC_EOF = 1;	// EOF
 	static final int EC_EOM = 2;	// End Of Media
@@ -66,8 +68,8 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		"Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
 	static final String[] devs = {
-		"sy0", "sy1", "sy2", "sy3",
-		"dk0", "dk1", "dk2", "dk3",
+		"sy0", "sy1", "sy2", "sy3", "sy4", "sy5", "sy6", "sy7",
+		"dk0", "dk1", "dk2", "dk3", "dk4", "dk5", "dk6", "dk7",
 		"???"
 	};
 
@@ -130,7 +132,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 				++x;
 			}
 		}
-		for (int x = 0; x < 8; ++x) {
+		for (int x = 0; x < devs.length - 1; ++x) {
 			String v = String.format("HDOSDrive_%s", devs[x]);
 			s = System.getenv(v);
 			if (s == null || s.length() == 0) {
@@ -167,8 +169,8 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		stopWait = new Semaphore(0);
 		cpuLock = new ReentrantLock();
 		cmds = new Vector<String[]>();
-		dirs = new String[8];
-		chans = new HdosOpenFile[8];
+		dirs = new String[devs.length - 1];
+		chans = new HdosOpenFile[NCHAN];
 		mem = new byte[65536];
 		boolean silent = (props.getProperty("silent") != null);
 		String t = props.getProperty("vhdos_trace");
@@ -254,14 +256,14 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 
 		lin = new BufferedReader(new InputStreamReader(System.in));
 		for (x = 0; x < dirs.length; ++x) {
-			s = String.format("vhdos_drive_%s", hdosDevice(x));
+			s = String.format("vhdos_drive_%s", devs[x]);
 			s = props.getProperty(s);
 			if (s != null) {
 				File f = new File(s);
 				// TODO: f.mkdirs(); ?
 				if (!f.exists() || !f.isDirectory()) {
 					System.err.format("Invalid path in %s: %s\n",
-						hdosDevice(x), s);
+						devs[x], s);
 					continue;
 				}
 				dirs[x] = s;
@@ -428,19 +430,13 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		cpu.setRegSP(sp);
 	}
 
-	// convert drive number to device string
-	private String hdosDevice(int d) {
-		if (d >= devs.length) d = devs.length - 1;
-		return devs[d];
-	}
-
-	// TODO: convert "sy[0-9]:" or "dk[0-9]:" prefix to drive number
+	// TODO: convert "sy[0-7]:" or "dk[0-7]:" prefix to drive number
 	private int hdosDrive(String s) {
-		if (!s.matches("sy[0-3]") && !s.matches("dk[0-3]")) {
+		if (!s.matches("sy[0-7].*") && !s.matches("dk[0-7].*")) {
 			return -1;
 		}
 		int d = s.charAt(2) - '0';
-		if (s.charAt(0) == 'd') d += 4;
+		if (s.charAt(0) == 'd') d += 8;
 		return d;
 	}
 
@@ -618,9 +614,9 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		Arrays.fill(pat, (byte)'?');
 		if (argv.length == 1) {
 			dx = 0;
-		} else if (argv[1].matches("sy[0-9]:") ||
-				argv[1].matches("dk[0-9]:")) {
-			dx = hdosDrive(argv[1].substring(0, 3));
+		} else if (argv[1].length() >= 4 &&
+				argv[1].charAt(3) == ':') {
+			dx = hdosDrive(argv[1]);
 		}
 		if (dx < 0) {
 			System.out.format("?\n");
@@ -806,7 +802,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		int n = fn.length();
 		int dx = 0;
 		if (n > 4 && fn.charAt(3) == ':') {
-			dx = hdosDrive(fn.substring(0, 3));
+			dx = hdosDrive(fn);
 			if (dx < 0) return null;
 			fn = fn.substring(4);
 		}
