@@ -4,8 +4,6 @@ Currently, reports version as 2.0 and is only expected to work for
 programs compatible with HDOS 2.0.
 
 The only built-in commands currently are DIR and TYPE.
-DIR is only implemented for whole-disk
-(does not yet support filename wildcard expressions).
 
 Disk mounting/dismounting is not required, associated SCALLs are
 ignored and always return success.

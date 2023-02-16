@@ -440,6 +440,56 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		return d;
 	}
 
+	private void setupPattern(byte[] pat, String s) {
+		byte[] fn = s.getBytes();
+		int x = 0;
+		int y = 0;
+		char c;
+		char b = '\0';
+		while (x < s.length() && s.charAt(x) != '.' && y < 8) {
+			c = s.charAt(x++);
+			if (c == '*') {
+				b = '?';
+				break;
+			}
+			pat[y++] = (byte)Character.toUpperCase(c);
+		}
+		while (y < 8) {
+			pat[y++] = (byte)b;
+		}
+		if (x < s.length() && s.charAt(x) != '.') {
+			// TODO: invalid
+			return;
+		}
+		++x;
+		b = '\0';
+		while (x < s.length() && y < 11) {
+			c = s.charAt(x++);
+			if (c == '*') {
+				b = '?';
+				break;
+			}
+			pat[y++] = (byte)Character.toUpperCase(c);
+		}
+		while (y < 11) {
+			pat[y++] = (byte)b;
+		}
+		if (x < s.length()) {
+			// TODO: invalid
+			return;
+		}
+	}
+
+	private boolean compare(byte[] buf, int off, byte[] pat) {
+		int x;
+		for (x = 0; x < 11; ++x) {
+			if (pat[x] != '?' && pat[x] != buf[off + x]) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	// TODO: support this?
 	private boolean loadSUB(File path, String[] argv) {
 		// TODO: or: cmds.clear(); // ???
@@ -617,6 +667,9 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		} else if (argv[1].length() >= 4 &&
 				argv[1].charAt(3) == ':') {
 			dx = hdosDrive(argv[1]);
+			if (argv[1].length() > 4) {
+				setupPattern(pat, argv[1].substring(4));
+			}
 		}
 		if (dx < 0) {
 			System.out.format("?\n");
@@ -631,6 +684,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		while (of.read(buf, 0, buf.length) > 0) {
 			for (x = 0; x < 0x1fa; x += 23) {
 				if ((buf[x] & 0xfe) == 0xfe) continue;
+				if (!compare(buf, x, pat)) continue;
 				fn = new String(buf, x, 8).replaceAll("\000", " ");
 				fx = new String(buf, x + 8, 3).replaceAll("\000", " ");
 				dx = getWORD(buf, x + 16);
