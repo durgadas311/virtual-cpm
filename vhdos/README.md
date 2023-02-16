@@ -10,8 +10,8 @@ DIR is only implemented for whole-disk
 Disk mounting/dismounting is not required, associated SCALLs are
 ignored and always return success.
 
-JAR file is in bin/VirtualHdos.jar.
-Documentation is in doc/VirtualHdos.pdf.
+JAR file is in [bin/VirtualHdos.jar](../bin/VirtualHdos.jar).
+Documentation is in [doc/VirtualHdos.pdf](../doc/VirtualHdos.pdf).
 
 ### EXAMPLES
 
