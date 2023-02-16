@@ -13,6 +13,8 @@ public class CpnetServer {
 	public int[] lstCid;
 	public String dir = null;
 	public String[] dirs;
+	public String home;
+	public String cwd;
 
 	public CpnetServer(Properties props, String prefix,
 			char tmp, byte sid, int max, String dir) {
@@ -29,6 +31,8 @@ public class CpnetServer {
 		cfgTab.max = (byte)max;
 		this.dir = dir;
 
+		home = System.getProperty("user.home");
+		cwd = System.getProperty("user.dir");
 		String s;
 		// See if individual drive paths are specified...
 		for (int x = 0; x < 16; ++x) {
@@ -37,6 +41,7 @@ public class CpnetServer {
 			if (s == null || s.length() == 0) {
 				continue;
 			}
+			s = expandDir(s);
 			File f = new File(s);
 			if (!f.exists()) {
 				try {
@@ -77,6 +82,15 @@ public class CpnetServer {
 				initLst(props, lid, s);
 			}
 		}
+	}
+
+	public String expandDir(String s) {
+		if (s.startsWith("${PWD}")) {
+			return s.replaceFirst("\\$\\{PWD\\}", cwd);
+		} else if (s.startsWith("${HOME}")) {
+			return s.replaceFirst("\\$\\{HOME\\}", home);
+		}
+		return s;
 	}
 
 	private void initLst(Properties props, int lid, String s) {

@@ -559,7 +559,7 @@ public class HostFileBdos implements NetworkServer {
 				if (s == null) {
 					s = System.getProperty("user.home") + "/HostFileBdos";
 				}
-				srv.dir = s;
+				srv.dir = srv.expandDir(s);
 			}
 			if (args.size() > 2) {
 				s = args.get(2);

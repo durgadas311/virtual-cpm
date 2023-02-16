@@ -104,11 +104,16 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private static String coredump = null;
 	private int exitCode = 0; // TODO: System.exit(exitCode)
 
+	static String home;
+	static String cwd;
+
 	public static void main(String[] argv) {
 		Properties props = new Properties();
+		home = System.getProperty("user.home");
+		cwd = System.getProperty("user.dir");
 		File f = new File("./vhdos.rc");
 		if (!f.exists()) {
-			f = new File(System.getProperty("user.home") + "/.vhdosrc");
+			f = new File(home + "/.vhdosrc");
 		}
 		if (f.exists()) {
 			try {
@@ -259,8 +264,16 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			s = String.format("vhdos_drive_%s", devs[x]);
 			s = props.getProperty(s);
 			if (s != null) {
+				if (s.startsWith("${PWD}")) {
+					s = s.replaceFirst("\\$\\{PWD\\}", cwd);
+				} else if (s.startsWith("${HOME}")) {
+					s = s.replaceFirst("\\$\\{HOME\\}", home);
+				}
 				File f = new File(s);
-				// TODO: f.mkdirs(); ?
+				// TODO: mkdir?
+				// if (!f.exists()) {
+				// 	try { f.mkdirs(); } catch (Exception ee) {}
+				// }
 				if (!f.exists() || !f.isDirectory()) {
 					System.err.format("Invalid path in %s: %s\n",
 						devs[x], s);
@@ -271,12 +284,16 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 		s = props.getProperty("vhdos_root_dir");
 		if (s == null) {
-			s = System.getProperty("user.home") + "/HostFileHdos";
+			s = home + "/HostFileHdos";
 		}
 		root = s;
 		for (x = 0; x < dirs.length; ++x) {
 			if (dirs[x] != null) continue;
 			dirs[x] = String.format("%s/%s", root, devs[x]);
+			File f = new File(dirs[x]);
+			if (!f.exists()) {
+				try { f.mkdirs(); } catch (Exception ee) {}
+			}
 		}
 		s = System.getenv("VHDOSShow");
 		if (s != null && s.length() == 3) {
