@@ -1345,11 +1345,19 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 					tracing = trc.preTrace(PC, clock);
 				}
 				if (PC == hdosv) {
+					if (tracing) {
+						trc.postTrace(PC, clk, null);
+					}
 					hdosTrap(PC);
 					if (!running) {
 						break;
 					}
+					// TODO: might return to TRAP?
+					// need 'while (PC == hdosv)...'?
 					PC = cpu.getRegPC();
+					if (trc != null) {
+						tracing = trc.preTrace(PC, clock);
+					}
 				}
 				if (PC >= memtop || PC < 0x1800) {
 					System.err.format("Crash %04x\n", PC);

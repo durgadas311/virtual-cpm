@@ -1,4 +1,4 @@
-vhdos asm sy2:demo,sy2:demo=sy2:demo,sy1:/err
+$ vhdos asm sy2:demo,sy2:demo=sy2:demo,sy1:/err
 >asm sy2:demo,sy2:demo=sy2:demo,sy1:/err
 
 
@@ -7,8 +7,9 @@ vhdos asm sy2:demo,sy2:demo=sy2:demo,sy1:/err
  No Errors Detected
 
 
-vhdos sy2:demo
+$ vhdos sy2:demo
 >sy2:demo
 
 HI THERE, SPORTS FANS!
 YOUR SYSTEM WORKS FINE!
+$
