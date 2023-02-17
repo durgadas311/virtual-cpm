@@ -8,6 +8,7 @@ import java.io.*;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.Properties;
+import java.util.Calendar;
 
 import z80core.*;
 import z80debug.*;
@@ -89,6 +90,14 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private String root;
 	private BufferedReader lin;
 
+	static final int s_date = 0x20bf;	// (9) "DD-MMM-YY"
+	static final int s_datc = 0x20c8;	// (2) coded date
+	static final int s_time = 0x20ca;	// (3+1) BCD HH:MM:SS (??)
+	static final int s_himem = 0x20ce;	// (2) h/w hi-mem +1 (0xffff)
+	static final int s_sysm = 0x20d0;	// (2) FWA res sys (hdose)
+	static final int s_usrm = 0x20d2;	// (2) LWA usr (follows pgm)
+	static final int s_omax = 0x20d4;	// (2) max ovr size
+
 	static final int hdosv = 0x0038; // the ONLY entry?
 	static final int stack = 0x2280;
 	static final int tpa = 0x2280;
@@ -96,6 +105,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	static final int hdose = memtop - 256; // or ????
 
 	private int intvec = memtop + 16;
+	private int sysvec = intvec + 16;
 
 	private boolean nosys;
 	private boolean y2k;
@@ -103,9 +113,11 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private static VirtualHdos vhdos;
 	private static String coredump = null;
 	private int exitCode = 0; // TODO: System.exit(exitCode)
+	private int vers = 0x20;
 
 	static String home;
 	static String cwd;
+	byte[] secBuf;
 
 	public static void main(String[] argv) {
 		Properties props = new Properties();
@@ -177,6 +189,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		dirs = new String[devs.length - 1];
 		chans = new HdosOpenFile[NCHAN];
 		mem = new byte[65536];
+		secBuf = new byte[512]; // at least 512...
 		boolean silent = (props.getProperty("silent") != null);
 		String t = props.getProperty("vhdos_trace");
 		s = props.getProperty("vhdos_cpu");
@@ -236,13 +249,13 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		// Do H17 init...
 		System.arraycopy(mem, 0x1f5a, mem, 0x2048, 88);
 		Arrays.fill(mem, 0x20a0, 0x20be, (byte)0);
-		setJMP(0x201f, intvec);
-		setJMP(0x2022, intvec);
-		setJMP(0x2025, intvec);
-		setJMP(0x2028, intvec);
-		setJMP(0x202b, intvec);
-		setJMP(0x202e, intvec);
-		setJMP(0x2031, intvec);
+		setJMP(0x201f, intvec + 1);
+		setJMP(0x2022, intvec + 2);
+		setJMP(0x2025, intvec + 3);
+		setJMP(0x2028, intvec + 4);
+		setJMP(0x202b, intvec + 5);
+		setJMP(0x202e, intvec + 6);
+		setJMP(0x2031, intvec + 7);
 		//
 		setJMP(0x0008, 0x201f);
 		setJMP(0x0010, 0x2022);
@@ -252,12 +265,18 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		setJMP(0x0030, 0x202e);
 		setJMP(0x0038, 0x2031);
 		// ... not sure who is responsible for these...
-		// setJMP(0x2108, sysvec++);	// S.SDD
-		// setJMP(0x210b, sysvec++);	// S.FATSERR
-		// setJMP(0x210e, sysvec++);	// S.DIREAD
-		// setJMP(0x2111, sysvec++);	// S.FCI
-		// setJMP(0x2114, sysvec++);	// S.SCI
-		// setJMP(0x2117, sysvec++);	// S.GUP
+		setJMP(0x2108, sysvec + 0);	// S.SDD
+		setJMP(0x210b, sysvec + 1);	// S.FATSERR
+		setJMP(0x210e, sysvec + 2);	// S.DIREAD
+		setJMP(0x2111, sysvec + 3);	// S.FCI
+		setJMP(0x2114, sysvec + 4);	// S.SCI
+		setJMP(0x2117, sysvec + 5);	// S.GUP
+
+		setWORD(s_himem, 0xffff);
+		setWORD(s_sysm, hdose);
+		setWORD(s_omax, 0);
+
+		setupTOD();
 
 		lin = new BufferedReader(new InputStreamReader(System.in));
 		for (x = 0; x < dirs.length; ++x) {
@@ -303,7 +322,33 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			}
 			System.exit(0);
 		}
+		s = props.getProperty("vhdos_vers");
+		if (s != null) {
+			vers = Integer.decode(s) & 0xff;
+		}
 		cmds.add(argv);
+	}
+
+	private void setupTOD() {
+		Calendar cal = Calendar.getInstance();
+		int yr = cal.get(Calendar.YEAR);
+		int mo = cal.get(Calendar.MONTH) + 1;
+		int da = cal.get(Calendar.DAY_OF_MONTH);
+		if (!y2k && yr > 1999) yr = 1999;
+		int dt = da | ((mo + 1) << 5) | ((yr - 1970) << 9);
+		setWORD(s_datc, dt);
+		String dts = String.format("%02d-%s-%02d", da, months[mo], yr % 100);
+		System.arraycopy(dts.getBytes(), 0, mem, s_date, 9);
+		int hr = cal.get(Calendar.HOUR_OF_DAY);
+		int mi = cal.get(Calendar.MINUTE);
+		int se = cal.get(Calendar.SECOND);
+		hr = ((hr / 10) << 4) | (hr % 10);
+		mi = ((mi / 10) << 4) | (mi % 10);
+		se = ((se / 10) << 4) | (se % 10);
+		mem[s_time] = (byte)hr;
+		mem[s_time + 1] = (byte)mi;
+		mem[s_time + 2] = (byte)se;
+		mem[s_time + 3] = (byte)0;
 	}
 
 	public void reset() {
@@ -550,14 +595,20 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	}
 
 	private int doABS(HdosOpenFile of) {
-		byte[] hdr = new byte[8];
 		try {
 			if (!of.open()) return -1;
-			if (of.read(hdr, 0, 8) <= 0) return -1;
-			int load = getWORD(hdr, 2);
-			int len = getWORD(hdr, 4);
-			int entry = getWORD(hdr, 6);
-			if (of.read(mem, load, len) <= 0) return -1;
+			if (of.read(secBuf, 0, 256) <= 0) return -1;
+			// TODO: verify 0xff, 0x00?
+			int load = getWORD(secBuf, 2);
+			int len = getWORD(secBuf, 4);
+			int entry = getWORD(secBuf, 6);
+			System.arraycopy(secBuf, 8, mem, load, 256 - 8);
+			int lnext = load + 256 - 8;
+			int nnext = ((len + 8 + 255) & ~255) - 256;
+			if (of.read(mem, lnext , nnext) <= 0) return -1;
+			if (getWORD(s_usrm) < lnext + nnext) {
+				setWORD(s_usrm, lnext + nnext);
+			}
 			return entry;
 		} finally {
 			of.close(); // or left open?
@@ -664,10 +715,9 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			System.out.format("%s?\n", argv[1]);
 			return;
 		}
-		byte[] buf = new byte[256];
-		while (of.read(buf, 0, buf.length) > 0) {
+		while (of.read(secBuf, 0, 256) > 0) {
 			// TODO: '\0' is EOF or just gobbled?
-			try { System.out.write(buf); } catch (Exception ee) {}
+			try { System.out.write(256); } catch (Exception ee) {}
 		}
 		of.close();
 		System.out.format("\n");
@@ -695,22 +745,21 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		File dir = new File(dirs[dx]);
 		HdosDirectoryFile of = new HdosDirectoryFile(dir, 042, nosys, y2k);
 		if (!of.open()) return;
-		byte[] buf = new byte[512];
 		String fn, fx;
 		System.out.format("NAME    .EXT   SIZE     DATE     FLAGS\n\n");
-		while (of.read(buf, 0, buf.length) > 0) {
+		while (of.read(secBuf, 0, 512) > 0) {
 			for (x = 0; x < 0x1fa; x += 23) {
-				if ((buf[x] & 0xfe) == 0xfe) continue;
-				if (!compare(buf, x, pat)) continue;
-				fn = new String(buf, x, 8).replaceAll("\000", " ");
-				fx = new String(buf, x + 8, 3).replaceAll("\000", " ");
-				dx = getWORD(buf, x + 16);
+				if ((secBuf[x] & 0xfe) == 0xfe) continue;
+				if (!compare(secBuf, x, pat)) continue;
+				fn = new String(secBuf, x, 8).replaceAll("\000", " ");
+				fx = new String(secBuf, x + 8, 3).replaceAll("\000", " ");
+				dx = getWORD(secBuf, x + 16);
 				System.out.format(
 					"%s.%s   %4d  %11s  %c %c\n",
 					fn, fx, dx,
-					getDate(buf, x + 19),
-					(buf[x + 14] & DIF_SYS) != 0 ? 'S' : ' ',
-					(buf[x + 14] & DIF_WP) != 0 ? 'W' : ' ');
+					getDate(secBuf, x + 19),
+					(secBuf[x + 14] & DIF_SYS) != 0 ? 'S' : ' ',
+					(secBuf[x + 14] & DIF_WP) != 0 ? 'W' : ' ');
 			}
 		}
 		of.close();
@@ -768,6 +817,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			running = false; // skip to next command
 			return;
 		} else {
+			setWORD(s_usrm, tpa);
 			entry = loadABS(path);
 			ok = (entry >= 0);
 		}
@@ -778,6 +828,8 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 		cpu.setRegSP(stack);
 		setPage0(argv);
+		setWORD(0x211a, 1);	// S.MOUNT - is HDOS mounted?
+		cpu.setRegA(0);	// syscmd.sys needs this
 		cpu.setRegPC(entry);
 	}
 
@@ -848,12 +900,10 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			cpu.setRegDE(de + n);
 			cpu.setRegBC(bc - n);
 		}
-		if (n != bc) {
-			cpu.setCarryFlag(true);
-			cpu.setRegA(EC_EOF);
+		if (n <= 0) {
+			error(EC_EOF);
 		} else {
-			cpu.setCarryFlag(false);
-			cpu.setRegA(EC_OK);
+			error(EC_OK);
 		}
 	}
 
@@ -1014,6 +1064,12 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		if (ch < 0) return;
 		int de = cpu.getRegDE();
 		int hl = cpu.getRegHL();
+		// TODO: need better way...
+		if (mem[hl + 3] == ':' && mem[hl] == 'T' && mem[hl + 1 ] == 'T') {
+			chans[ch] = new HdosTtyFile(new File("tty"), fnc);
+			error(EC_OK);
+			return;
+		}
 		File path = mkFilePath(de, hl);
 		if (path == null) {
 			error(EC_IFN);
@@ -1058,6 +1114,10 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		if (ch < 0) return;
 		int bc = cpu.getRegBC();
 		int de = cpu.getRegDE();
+		if (bc == 0) { // HDOS programs seem fond of doing this...
+			error(EC_OK);
+			return;
+		}
 		int n = chans[ch].write(mem, de, bc);
 		checkRW(bc, de, n);
 	}
@@ -1089,18 +1149,20 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			error(EC_RF);
 			return;
 		}
-		// TODO: pop return address???
-		cpu.setRegPC(entry);
+		doPOP();
+		doPUSH(entry);	// doRET() will be called...
 		error(EC_OK);
 	}
 
 	private void doSETTOP() {
 		int hl = cpu.getRegHL();
 		int ec = EC_OK;
-		// TODO: anything we care about?
-		if (hl >= memtop) {
-			cpu.setRegHL(memtop);
+		int top = getWORD(s_sysm);
+		if (hl >= top) {
+			cpu.setRegHL(top);
 			//ec = EC_NEM; // no errors allowed?
+		} else {
+			setWORD(s_usrm, hl);
 		}
 		error(ec);
 	}
@@ -1173,6 +1235,37 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 	}
 
+	private int crc16(int crc, int val) {
+		int x;
+		int v = val;
+		int c = crc;
+
+		for (x = 0; x < 8; ++x) {
+			v <<= 1;	// bit in 0x100
+			c <<= 1;	// bit in 0x10000
+			if ((((c >> 8) ^ v) & 0x100) != 0) {
+				c ^= 0x8005;
+			}
+		}
+		return c & 0xffff;
+	}
+
+	private void doCRC16() {
+		int hl = cpu.getRegHL(); // buffer
+		int de = cpu.getRegDE(); // CRC16 in
+		int bc = cpu.getRegBC(); // count
+
+		while (bc > 0) {
+			de = crc16(de, mem[hl] & 0xff);
+			++hl;
+			--bc;
+		}
+		cpu.setRegHL(hl);
+		cpu.setRegDE(de);
+		cpu.setRegBC(0);
+		error(EC_OK);
+	}
+
 	private boolean loadERRORs() {
 		if (errv != null) return true;
 		errv = new HashMap<Integer, String>();
@@ -1238,8 +1331,25 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			error(EC_OK);
 			break;
 		case 9:	// .VERS - HDOS version
-			cpu.setRegA(0x20);
+			cpu.setRegA(vers);
 			cpu.setCarryFlag(false);
+			break;
+		case 10: // .GDA (3.0)
+			if (vers >= 0x30) {
+				// TODO: may require implementation?
+				cpu.setRegHL(0);
+				cpu.setRegBC(0);
+				error(EC_UND);
+			} else {
+				error(EC_ILC);
+			}
+			break;
+		case 11: // .CRC16 (3.0)
+			if (vers >= 0x30) {
+				doCRC16();
+			} else {
+				error(EC_ILC);
+			}
 			break;
 		// TODO: non-resident functions...
 		case 040:	// .LINK
@@ -1319,7 +1429,8 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			// no need? not supported
 			error(EC_OK);
 			break;
-		case 0205:	// .CLEAN - clean device
+		case 0205:	// .CLEAN (2.0) - clean device
+				// .RESNMS (3.0)
 			// no need? not supported
 			error(EC_OK);
 			break;
@@ -1330,6 +1441,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		default:
 			System.err.format("Unknown HDOS function %d from %04x\n", fnc, ret);
 			// TODO: crash...? return CY?
+			error(EC_ILC);
 			break;
 		}
 		doRET();
@@ -1342,6 +1454,29 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private void warmStart() {
 		// TODO: close all? ???
 		//setJMP(hdosv, hdose);
+	}
+
+	private boolean checkTrap(int pc) {
+		if ((pc & ~0x0038) == 0) {
+			int irq = pc >> 3;
+			System.err.format("Crash RST%d\n", irq);
+			return true;
+		}
+		int vec = pc - sysvec;
+		if (vec >= 0 && vec < 6) {
+			String s = "";
+			switch (vec) {
+			case 0:	s = "S.SDD"; break;
+			case 1:	s = "S.FATSERR"; break; // Fatal System Error (halt)
+			case 2:	s = "S.DIREAD"; break;
+			case 3:	s = "S.FCI"; break;
+			case 4:	s = "S.SCI"; break;
+			case 5:	s = "S.GUP"; break;
+			}
+			System.err.format("Crash %s\n", s);
+			return true;
+		}
+		return false;
 	}
 
 	//////// Runnable /////////
@@ -1376,8 +1511,10 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 						tracing = trc.preTrace(PC, clock);
 					}
 				}
-				if (PC >= memtop || PC < 0x1800) {
-					System.err.format("Crash %04x\n", PC);
+				if (PC >= hdose || PC < 0x1800) {
+					if (!checkTrap(PC)) {
+						System.err.format("Crash %04x\n", PC);
+					}
 					running = false;
 					break;
 				}

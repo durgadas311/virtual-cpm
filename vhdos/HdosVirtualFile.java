@@ -47,14 +47,16 @@ public class HdosVirtualFile extends HdosOpenFile {
 
 	public int read(byte[] dat, int off, int cnt) {
 		try {
+			cnt &= ~255;
 			int n = fd.read(dat, off, cnt);
 			if (n < 0) {
 				return n;
 			}
-			if (n < cnt) {
-				Arrays.fill(dat, off + n, off + cnt, (byte)0x00);
+			int end = (n + 255) & ~255;
+			if (n < end) {
+				Arrays.fill(dat, off + n, off + end, (byte)0x00);
 			}
-			return cnt;
+			return end;
 		} catch (Exception ee) {
 			// ee.getMessage()
 			return -1;
@@ -63,6 +65,7 @@ public class HdosVirtualFile extends HdosOpenFile {
 
 	public int write(byte[] dat, int off, int cnt) {
 		try {
+			cnt &= ~255;
 			fd.write(dat, off, cnt);
 			return cnt;
 		} catch (Exception ee) {
