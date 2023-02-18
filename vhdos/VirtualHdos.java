@@ -131,6 +131,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private int exitCode = 0; // TODO: System.exit(exitCode)
 	private int vers = 0x20;
 	private int cpuType = 2;
+	private boolean done = false;
 
 	static String home;
 	static String cwd;
@@ -842,6 +843,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private void doCCP(String[] argv) {
 		boolean ok = false;
 		int entry = -1;
+		done = false;
 		// Special case: "submit" file is directly referenced.
 		// TODO: make this more discriminating? */*? !pwd?
 		if (argv.length < 1) {
@@ -1399,6 +1401,13 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private void doEXIT() {
 		exitCode = cpu.getRegA();
 		if (syscmd) {
+			if (done && vers < 0x30) {
+				// This is not how 3.0 shuts down...
+				System.out.format("SYSTEM SHUTDOWN\n");
+				running = false;
+				return;
+			}
+			// is re-load necessary?
 			File sc = new File(dirs[0], "syscmd.sys");
 			int entry = loadABS(sc);
 			if (entry < 0) {
@@ -1589,6 +1598,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			break;
 		case 0206:	// .DAD - dismount all
 			// no need? not supported
+			done = true;
 			error(EC_OK);
 			break;
 		default:
@@ -1690,6 +1700,11 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 				clk = cpu.execute();
 				if (tracing) {
 					trc.postTrace(PC, clk, null);
+				}
+				if (vers >= 0x30 && done && !cpu.isIE() &&
+						PC == cpu.getRegPC()) {
+					System.out.format("\n");
+					running = false;
 				}
 				clock += clk;
 			}
