@@ -97,23 +97,40 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	static final int s_sysm = 0x20d0;	// (2) FWA res sys (hdose)
 	static final int s_usrm = 0x20d2;	// (2) LWA usr (follows pgm)
 	static final int s_omax = 0x20d4;	// (2) max ovr size
+	static final int s_scr = 0x2151;	// (2) addr of scratch buffer
+	static final int s_dfwa = 0x20ec;	// (2) addr S.DFWA - device table
+	static final int s_rfwa = 0x20ee;	// (2) addr S.RFWA - res HDOS
+
+	static final int batbuf = 0x0054;	// (2) addr S.PATH
+	static final int batptr = 0x0056;	// (2) addr S.PATH
+	static final int subbuf = 0x0058;	// (2) addr S.PATH
+	static final int s_path = 0x005a;	// (2) addr S.PATH
+	static final int s_prmt = 0x005c;	// (2) addr S.PRMT
+	static final int s_edlin = 0x005e;	// (2) addr S.EDLIN
+	static final int cslibuf = 0x003e;	// (2) addr CSLIBUF (not used?)
 
 	static final int hdosv = 0x0038; // the ONLY entry?
 	static final int stack = 0x2280;
 	static final int tpa = 0x2280;
 	static final int memtop = 0xff00; // or ????
-	static final int hdose = memtop - 256; // or ????
+	static final int scrbuf = memtop - 512; // or ????
+	static final int hdose = scrbuf - 256; // or ????
+	static final int tttbl = hdose + 16;
+	static final int sytbl = tttbl + 14;
+	static final int dktbl = sytbl + 14;
 
 	private int intvec = memtop + 16;
 	private int sysvec = intvec + 16;
 
 	private boolean nosys;
 	private boolean y2k;
+	private boolean syscmd;
 
 	private static VirtualHdos vhdos;
 	private static String coredump = null;
 	private int exitCode = 0; // TODO: System.exit(exitCode)
 	private int vers = 0x20;
+	private int cpuType = 2;
 
 	static String home;
 	static String cwd;
@@ -136,7 +153,11 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		} else {
 			// TODO: any alternate defaults?
 		}
-		String s = System.getenv("HDOSDrives");
+		String s = System.getenv("VHDOSVersion");
+		if (s != null) {
+			props.setProperty("vhdos_vers", s);
+		}
+		s = System.getenv("HDOSDrives");
 		if (s != null) {
 			int x = 0;
 			for (String ss : s.split(",")) {
@@ -195,21 +216,25 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		s = props.getProperty("vhdos_cpu");
 		if (s != null) {
 			if (s.matches("[iI]?8080")) {
+				cpuType = 0;
 				cpu = new I8080(this);
 				if (t != null) {
 					trc = new I8080Tracer(props, "vhdos", cpu, this, t);
 				}
 			} else if (s.matches("[iI]?8085")) {
+				cpuType = 1;
 				cpu = new I8085(this);
 				if (t != null) {
 					trc = new I8085Tracer(props, "vhdos", cpu, this, t);
 				}
 			} else if (s.matches("[zZ]80")) {
+				cpuType = 2;
 				cpu = new Z80(this);
 				if (t != null) {
 					trc = new Z80Tracer(props, "vhdos", cpu, this, t);
 				}
 			} else if (s.matches("[zZ]180")) {
+				cpuType = 3;
 				Z180 z180 = new Z180(this, null, true); // Z80S180
 				cpu = z180;
 				if (t != null) {
@@ -218,6 +243,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			}
 		}
 		if (cpu == null) {
+			cpuType = 2;
 			cpu = new Z80(this);
 			if (t != null) {
 				trc = new Z80Tracer(props, "vhdos", cpu, this, t);
@@ -236,6 +262,10 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 		nosys = (props.getProperty("vhdos_nosys") != null);
 		y2k = (props.getProperty("vhdos_y2k") != null);
+		s = props.getProperty("vhdos_vers");
+		if (s != null) {
+			vers = Integer.decode(s) & 0xff;
+		}
 
 		try {
 			String rom = "2716_444-19_H17.rom";
@@ -275,9 +305,36 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		setWORD(s_himem, 0xffff);
 		setWORD(s_sysm, hdose);
 		setWORD(s_omax, 0);
+		setWORD(s_scr, scrbuf);
+		setWORD(s_dfwa, tttbl);	// TT0: is first device in table
+		setWORD(s_rfwa, hdose);
 
-		setupTOD();
+		int usd = dktbl + 14 + 1;	// consumes 24 bytes for 3 devs
+		setupDevTbl(tttbl, -1, 0, usd);		// TT0 table
+		usd += 8;
+		setupDevTbl(sytbl, 0, memtop, usd);	// use memtop for fake GRT
+		usd += 8;
+		setupDevTbl(dktbl, 8, memtop, usd);	// ('')
 
+		if (vers >= 0x30) {
+			setJMP(0, 0);
+			setupTOD();
+			usd = 0x1d00; // TODO: overwrites H17 ROM... confirm
+			setWORD(batbuf, usd);
+			setWORD(batptr, usd);
+			usd += 256;
+			setWORD(subbuf, usd);
+			usd += 101;
+			setWORD(s_path, usd);
+			setSTRING(usd, "SY0:");
+			usd += 101;
+			setWORD(s_prmt, usd);
+			mem[usd] = (byte)0;
+			usd += 101;
+			setWORD(s_edlin, usd);
+			usd += 101;
+			setWORD(cslibuf, usd); // never used?
+		}
 		lin = new BufferedReader(new InputStreamReader(System.in));
 		for (x = 0; x < dirs.length; ++x) {
 			s = String.format("vhdos_drive_%s", devs[x]);
@@ -322,17 +379,13 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			}
 			System.exit(0);
 		}
-		s = props.getProperty("vhdos_vers");
-		if (s != null) {
-			vers = Integer.decode(s) & 0xff;
-		}
 		cmds.add(argv);
 	}
 
 	private void setupTOD() {
 		Calendar cal = Calendar.getInstance();
 		int yr = cal.get(Calendar.YEAR);
-		int mo = cal.get(Calendar.MONTH) + 1;
+		int mo = cal.get(Calendar.MONTH);
 		int da = cal.get(Calendar.DAY_OF_MONTH);
 		if (!y2k && yr > 1999) yr = 1999;
 		int dt = da | ((mo + 1) << 5) | ((yr - 1970) << 9);
@@ -446,6 +499,14 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private void setWORD(int adr, int vec) {
 		mem[adr + 0] = (byte)vec;
 		mem[adr + 1] = (byte)(vec >> 8);
+	}
+
+	// copy NUL-terminated string
+	private void setSTRING(int adr, String str) {
+		int x = str.length();
+		System.arraycopy(str.getBytes(), 0, mem, adr, x);
+		mem[x] = (byte)0;
+
 	}
 
 	private void setJMP(int adr, int vec) {
@@ -622,7 +683,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 
 	private int loadABS(File path) {
 		if (chans[0] != null && !chans[0].closed()) {
-			// TODO: close channel...
+			chans[0].close();
 			chans[0] = null;
 		}
 		chans[0] = new HdosVirtualFile(path, 042);
@@ -693,6 +754,8 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 		// TODO: AIO.DTA...
 		mem[dst] = (byte)0x01;	// TODO: AIO.FLG - valid device/file
+		setWORD(dst + 15, 0); // ???
+		setWORD(dst + 17, dx < 8 ? sytbl : dktbl); // (+9) passed to S.GUP
 		return EC_OK;
 	}
 
@@ -811,6 +874,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			running = false;
 			return;
 		}
+		syscmd = path.getName().equals("syscmd.sys");
 		if (path.getName().endsWith(".sub")) {
 			ok = loadSUB(path, argv);
 			// nothing to run, yet...
@@ -995,6 +1059,40 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			}
 		}
 		return new File(dirs[dx], fn);
+	}
+
+	// dx < 0 for TT0 table (grt=0)
+	private void setupDevTbl(int adr, int dx, int grt, int usd) {
+		int m = 0x07;
+		int n = 8;
+		if (dx < 0) {
+			mem[adr + 0] = (byte)'T';
+			mem[adr + 1] = (byte)'T';
+			m = 0x01;
+			n = 1;
+		} else {
+			mem[adr + 0] = (byte)devs[dx].charAt(0);
+			mem[adr + 1] = (byte)devs[dx].charAt(1);
+		}
+		mem[adr + 2] = (byte)0x03; // residence code
+		setJMP(adr + 3, hdose);	// JMP to driver processing rtn?
+		mem[adr + 6] = (byte)0x0f; // dir, r/w, rnd
+		mem[adr + 7] = (byte)m; // unit mask...???
+		mem[adr + 8] = (byte)n; // max units ???
+		setWORD(adr + 9, usd); // unit-specific data
+		setWORD(adr + 11, 0); // driver length
+		mem[adr + 13] = (byte)0; // driver grp adr (on disk?)
+		mem[adr + 14] = (byte)0; // in case this is last
+		//
+		if (dx < 0) {
+			mem[usd + 0] = (byte)0x06;	// r/w
+		} else {
+			mem[usd + 0] = (byte)0x0f;	// unit-specific flag
+			mem[usd + 1] = (byte)2;	// sec/grp (what value?)
+			setWORD(usd + 2, grt);	// GRT (if dir)
+			setWORD(usd + 4, 0);	// GRT sector number
+			setWORD(usd + 6, 0);	// DIR first sector number
+		}
 	}
 
 	private void doNAME() {
@@ -1235,6 +1333,24 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 	}
 
+	private void doGDA() {
+		int de = cpu.getRegDE();
+		if (de == 0x5454) {	// 'TT'
+			cpu.setRegBC(tttbl);
+		} else if (de == 0x5953) {	// 'SY'
+			cpu.setRegBC(sytbl);
+		} else if (de == 0x4b44) {	// 'DK'
+			cpu.setRegBC(dktbl);
+		} else {
+			cpu.setRegHL(0);
+			cpu.setRegBC(0);
+			error(EC_UND);
+			return;
+		}
+		cpu.setRegHL(hdose); // yes?
+		error(EC_OK);
+	}
+
 	private int crc16(int crc, int val) {
 		int x;
 		int v = val;
@@ -1264,6 +1380,38 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		cpu.setRegDE(de);
 		cpu.setRegBC(0);
 		error(EC_OK);
+	}
+
+	private void doS_GUP() {
+		int hl = cpu.getRegHL(); // buffer
+		// all units use the same - ignore A
+		hl = getWORD(hl);
+		cpu.setRegHL(hl);
+		error(EC_OK); // needed?
+	}
+
+	private void doDELAY() {
+		int a = cpu.getRegA();
+		// TODO: any reason to actually delay?
+		// try { System.sleep(a * 2); } catch (Exception ee) {}
+	}
+
+	private void doEXIT() {
+		exitCode = cpu.getRegA();
+		if (syscmd) {
+			File sc = new File(dirs[0], "syscmd.sys");
+			int entry = loadABS(sc);
+			if (entry < 0) {
+				System.err.format("No %s\n", sc.getAbsolutePath());
+				running = false;
+				return;
+			}
+			cpu.setRegSP(stack);
+			cpu.setRegA(0);	// syscmd.sys needs this?
+			doPUSH(entry);	// doRET() will be called...
+		} else {
+			running = false;
+		}
 	}
 
 	private boolean loadERRORs() {
@@ -1296,8 +1444,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		doPUSH(ret);
 		switch (fnc) {
 		case 0:	// .EXIT
-			exitCode = cpu.getRegA();
-			running = false;
+			doEXIT();
 			break;
 		case 1:	// .SCIN
 			if (constat() != 0) {
@@ -1336,10 +1483,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			break;
 		case 10: // .GDA (3.0)
 			if (vers >= 0x30) {
-				// TODO: may require implementation?
-				cpu.setRegHL(0);
-				cpu.setRegBC(0);
-				error(EC_UND);
+				doGDA();
 			} else {
 				error(EC_ILC);
 			}
@@ -1409,6 +1553,15 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		case 063:	// .OPEN - parameterized open
 			error(EC_ILC);
 			break;
+		case 0101:	// .TASK (3.0)
+			if (vers >= 0x30) {
+				// TODO: what is this function?
+				// B=TAS.DEA
+				error(EC_OK); // nothing checked anyway...
+			} else {
+				error(EC_ILC);
+			}
+			break;
 		case 0200:	// .MOUNT - mount
 			// no need? not supported
 			error(EC_OK);
@@ -1456,27 +1609,38 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		//setJMP(hdosv, hdose);
 	}
 
-	private boolean checkTrap(int pc) {
+	// 1 = crash w/message, -1 = crash w/o msg, 0 = was handled
+	private int checkTrap(int pc) {
+		if (pc == 0x0000 && vers >= 0x30 && syscmd &&
+				(mem[0] & 0xff) == 0xc3 &&
+				(pc = getWORD(1)) != 0) {
+			doPUSH(pc);	// for doRET()
+			return 0;
+		}
 		if ((pc & ~0x0038) == 0) {
 			int irq = pc >> 3;
 			System.err.format("Crash RST%d\n", irq);
-			return true;
+			return -1;
+		}
+		if (pc == 0x002b) { // delay A * 2 mS
+			doDELAY();
+			return 0;
 		}
 		int vec = pc - sysvec;
 		if (vec >= 0 && vec < 6) {
-			String s = "";
+			String s = null;
 			switch (vec) {
 			case 0:	s = "S.SDD"; break;
 			case 1:	s = "S.FATSERR"; break; // Fatal System Error (halt)
 			case 2:	s = "S.DIREAD"; break;
 			case 3:	s = "S.FCI"; break;
 			case 4:	s = "S.SCI"; break;
-			case 5:	s = "S.GUP"; break;
+			case 5:	doS_GUP(); break;
 			}
-			System.err.format("Crash %s\n", s);
-			return true;
+			if (s != null) System.err.format("Crash %s\n", s);
+			return s == null ? 0 : -1;
 		}
-		return false;
+		return 1;
 	}
 
 	//////// Runnable /////////
@@ -1512,7 +1676,12 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 					}
 				}
 				if (PC >= hdose || PC < 0x1800) {
-					if (!checkTrap(PC)) {
+					int e = checkTrap(PC);
+					if (e == 0) {
+						doRET();
+						continue;
+					}
+					if (e == 1) {
 						System.err.format("Crash %04x\n", PC);
 					}
 					running = false;

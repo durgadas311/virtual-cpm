@@ -108,6 +108,7 @@ public class HdosDirectoryFile extends HdosOpenFile {
 			if (y < 0) break;
 			x += 23;
 			if (((x & 0x1ff) >= 0x1fa)) {
+				dir[(x & ~0x1ff) + 0x1fb] = (byte)23; // DIRLEN
 				x = (x + 6) & ~0x1ff;
 			}
 		}
@@ -115,6 +116,7 @@ public class HdosDirectoryFile extends HdosOpenFile {
 			dir[x] = (byte)0xfe;
 			x += 23;
 			if (((x & 0x1ff) >= 0x1fa)) {
+				dir[(x & ~0x1ff) + 0x1fb] = (byte)23; // DIRLEN
 				x = (x + 6) & ~0x1ff;
 			}
 		}

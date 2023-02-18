@@ -1,9 +1,13 @@
 ## vhdos - HDOS emulator
 
-Currently, reports version as 2.0 and is only expected to work for
-programs compatible with HDOS 2.0.
+Default version is 2.0, and 3.0 may be selected through
+configuration options.
 
-The only built-in commands currently are DIR and TYPE.
+The only built-in commands currently provided are DIR and TYPE.
+syscmd.sys may run, but generally depends on specific memory contents.
+PIP versions of the commands should work, like (DIR) "PIP /LIST" or
+(TYPE) "PIP TT0:=file". Note that directory listings from PIP will
+not show correct files sizes, or disk usage.
 
 Disk mounting/dismounting is not required, associated SCALLs are
 ignored and always return success.
