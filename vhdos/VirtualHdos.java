@@ -101,6 +101,9 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	static final int s_dfwa = 0x20ec;	// (2) addr S.DFWA - device table
 	static final int s_rfwa = 0x20ee;	// (2) addr S.RFWA - res HDOS
 
+	static final int s_label = 0x0003;	// (2) addr S.LABEL
+	static final int s_fmask = 0x0005;	// (2) byte S.FMASK
+	static final int s_lwa = 0x0006;	// (2) addr S.LWA
 	static final int batbuf = 0x0054;	// (2) addr S.PATH
 	static final int batptr = 0x0056;	// (2) addr S.PATH
 	static final int subbuf = 0x0058;	// (2) addr S.PATH
@@ -130,7 +133,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private static String coredump = null;
 	private int exitCode = 0; // TODO: System.exit(exitCode)
 	private int vers = 0x20;
-	private int cpuType = 2;
+	private int cpuType = 0x80;	// Z80 by default
 	private boolean done = false;
 
 	static String home;
@@ -217,25 +220,25 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		s = props.getProperty("vhdos_cpu");
 		if (s != null) {
 			if (s.matches("[iI]?8080")) {
-				cpuType = 0;
+				cpuType = 0x00;
 				cpu = new I8080(this);
 				if (t != null) {
 					trc = new I8080Tracer(props, "vhdos", cpu, this, t);
 				}
 			} else if (s.matches("[iI]?8085")) {
-				cpuType = 1;
+				cpuType = 0x40;
 				cpu = new I8085(this);
 				if (t != null) {
 					trc = new I8085Tracer(props, "vhdos", cpu, this, t);
 				}
 			} else if (s.matches("[zZ]80")) {
-				cpuType = 2;
+				cpuType = 0x80;
 				cpu = new Z80(this);
 				if (t != null) {
 					trc = new Z80Tracer(props, "vhdos", cpu, this, t);
 				}
 			} else if (s.matches("[zZ]180")) {
-				cpuType = 3;
+				cpuType = 0xc0;
 				Z180 z180 = new Z180(this, null, true); // Z80S180
 				cpu = z180;
 				if (t != null) {
@@ -244,7 +247,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			}
 		}
 		if (cpu == null) {
-			cpuType = 2;
+			cpuType = 0x80;
 			cpu = new Z80(this);
 			if (t != null) {
 				trc = new Z80Tracer(props, "vhdos", cpu, this, t);
@@ -320,7 +323,9 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		if (vers >= 0x30) {
 			setJMP(0, 0);
 			setupTOD();
-			usd = 0x1d00; // TODO: overwrites H17 ROM... confirm
+			usd = 0x1c00; // TODO: overwrites H17 ROM... confirm
+			setWORD(s_label, usd);
+			usd += 256;
 			setWORD(batbuf, usd);
 			setWORD(batptr, usd);
 			usd += 256;
@@ -335,6 +340,9 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			setWORD(s_edlin, usd);
 			usd += 101;
 			setWORD(cslibuf, usd); // never used?
+			// usd += 101; // nothing follows
+			// setWORD(s_lwa, ?); // never used?
+			mem[s_fmask] = (byte)(cpuType | 0x10); // H19 - close enough
 		}
 		lin = new BufferedReader(new InputStreamReader(System.in));
 		for (x = 0; x < dirs.length; ++x) {
@@ -912,6 +920,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private int conin() {
 		int a = 0;
 		try {
+			// Alt + letter = (0x80 | ascii)
 			a = lin.read();
 			// TODO: how to pass a real ^J/LF?
 			//if (a == '\n') a = '\r';
@@ -999,14 +1008,22 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		return new File(dirs[dx], fn);
 	}
 
-	private void hexDump(int adr, int len) {
-		hexDump(mem, adr, len);
+	private void hexDump(String tag, int adr, int len) {
+		hexDump(mem, tag, adr, len);
 	}
 
-	static public void hexDump(byte[] buf, int adr, int len) {
+	private void hexDump(int adr, int len) {
+		hexDump(mem, null, adr, len);
+	}
+
+	static public void hexDump(byte[] buf, String tag, int adr, int len) {
 		int x;
 		while (len > 0) {
-			System.err.format("%04x:", adr);
+			if (tag != null) {
+				System.err.format("%s %04x:", tag, adr);
+			} else {
+				System.err.format("%04x:", adr);
+			}
 			for (x = 0; x < 16 && x < len; ++x) {
 				System.err.format(" %02x", buf[adr + x] & 0xff);
 			}
@@ -1236,10 +1253,13 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		error(EC_OK);
 	}
 
+	// Contrary to HDOS documentation, DE is default block.
+	// Note, DE is ignored/don't-care if HL contains full dev:name.typ.
 	private void doLINK() {
 		int entry;
 		int hl = cpu.getRegHL();
-		File fn = mkFilePath(-1, hl);
+		int de = cpu.getRegDE();
+		File fn = mkFilePath(de, hl);
 		if (fn == null) {
 			error(EC_IFN);
 			return;
@@ -1510,6 +1530,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			break;
 		case 041:	// .CTLC
 			// TODO: need to support this?
+			error(EC_OK);
 			break;
 		case 042:	// .OPENR - read only
 		case 043:	// .OPENW - write only
