@@ -79,6 +79,8 @@ public class VirtualHdos implements Computer, Memory,
 	private CPU cpu;
 	private CPUTracer trc;
 	private long clock;
+	private long lastScin;
+	private int scin;
 	private byte[] mem;
 	private boolean running;
 	private Vector<String[]> cmds;
@@ -980,7 +982,7 @@ public class VirtualHdos implements Computer, Memory,
 
 	private int conin() {
 		int a = 0;
-		if (fifo.size() > 0) try {
+		try {
 			a = fifo.take();
 		} catch (Exception ee) {}
 		return a;
@@ -1528,6 +1530,19 @@ public class VirtualHdos implements Computer, Memory,
 		}
 	}
 
+	private void doSCIN() {
+		if (clock - lastScin > 30) scin = 0;
+		if (++scin > 100 || constat()) {
+			int c = conin(); // may sleep
+			cpu.setRegA(c);
+			cpu.setCarryFlag(c == 0);
+			scin = 0;
+		} else {
+			cpu.setCarryFlag(true);
+			lastScin = clock;
+		}
+	}
+
 	private boolean loadERRORs() {
 		if (errv != null) return true;
 		errv = new HashMap<Integer, String>();
@@ -1561,12 +1576,7 @@ public class VirtualHdos implements Computer, Memory,
 			doEXIT();
 			break;
 		case 1:	// .SCIN
-			if (constat()) {
-				cpu.setRegA(conin());
-				cpu.setCarryFlag(false);
-			} else {
-				cpu.setCarryFlag(true);
-			}
+			doSCIN();
 			break;
 		case 2:	// .SCOUT
 			conout(cpu.getRegA());
@@ -1791,7 +1801,6 @@ public class VirtualHdos implements Computer, Memory,
 	//////// Runnable /////////
 	public void run() {
 		String xtra = null;
-		long clock = 0;
 		int clk = 0;
 		boolean tracing = false;
 		coldStart();
@@ -1848,6 +1857,7 @@ public class VirtualHdos implements Computer, Memory,
 					System.out.format("\n");
 					running = false;
 				}
+				if (clk < 0) clk = -clk;
 				clock += clk;
 			}
 		}
@@ -1908,6 +1918,7 @@ public class VirtualHdos implements Computer, Memory,
 				if (c == 0x03 || c == 0x18) {
 					// Ctrl-C goes immediately
 					cpu.setINTLine(true);
+					fifo.add(0); // wake up if sleeping
 					return; // discard rest
 				}
 				fifo.add(c);
