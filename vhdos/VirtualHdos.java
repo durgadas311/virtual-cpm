@@ -611,15 +611,14 @@ public class VirtualHdos implements Computer, Memory,
 	}
 
 	private void setPage0(String[] argv) {
-		// TODO: where is the commandline placed?
-		// pushed onto stack...
+		// push cmd tail onto stack...
+		// this is NOT terminated by NUL.
 		int sp = cpu.getRegSP();
 		String s = "";
 		for (int x = 1; x < argv.length; ++x) {
 			s += ' ';
 			s += argv[x].toUpperCase();
 		}
-		mem[--sp] = (byte)0;	// always NUL-terminated
 		if (s.length() > 0) {
 			sp -= s.length();
 			System.arraycopy(s.getBytes(), 0, mem, sp, s.length());
