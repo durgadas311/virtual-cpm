@@ -85,6 +85,7 @@ public class VirtualHdos implements Computer, Memory,
 	private Semaphore stopWait;
 	private ReentrantLock cpuLock;
 	private Vector<String[]> cmds;
+	private Vector<Integer> paths;
 	private Map<Integer, String> errv;
 	private javax.swing.Timer timer;
 
@@ -187,6 +188,10 @@ public class VirtualHdos implements Computer, Memory,
 			String p = String.format("vhdos_drive_%s", devs[x]);
 			props.setProperty(p, s.trim());
 		}
+		s = System.getenv("VHDOSPath");
+		if (s != null) {
+			props.setProperty("vhdos_path", s);
+		}
 		s = System.getenv("VHDOSCoreDump");
 		if (s != null) {
 			props.setProperty("vhdos_dump", s);
@@ -215,6 +220,7 @@ public class VirtualHdos implements Computer, Memory,
 		stopWait = new Semaphore(0);
 		cpuLock = new ReentrantLock();
 		cmds = new Vector<String[]>();
+		paths = new Vector<Integer>();
 		dirs = new String[devs.length - 1];
 		chans = new HdosOpenFile[NCHAN];
 		mem = new byte[65536];
@@ -317,7 +323,28 @@ public class VirtualHdos implements Computer, Memory,
 			}
 			System.exit(0);
 		}
+		s = props.getProperty("vhdos_path");
+		if (s != null) {
+			String[] ss = s.split("[ :;,]");
+			for (String e : ss) {
+				int n = e.length();
+				if (n > 3 || n < 2) {
+					System.err.format("Skipping bad path \"%\"\n", e);
+					continue;
+				}
+				if (n == 2) e += '0';
+				n = hdosDrive(e.toLowerCase());
+				if (n < 0) {
+					System.err.format("Skipping unknown path \"%\"\n", e);
+					continue;
+				}
+				paths.add(n);
+			}
+		} else {
+			paths.add(0);
+		}
 
+		// start setting up memory
 		try {
 			String rom = "2716_444-19_H17.rom";
 			InputStream fi = this.getClass().getResourceAsStream(rom);
@@ -347,7 +374,7 @@ public class VirtualHdos implements Computer, Memory,
 		setJMP(0x0038, 0x2031);
 		// ... not sure who is responsible for these...
 		setJMP(0x2108, sysvec + 0);	// S.SDD
-		setJMP(0x210b, sysvec + 1);	// S.FATSERR
+		setJMP(0x210b, sysvec + 1);	// S.FASER
 		setJMP(0x210e, sysvec + 2);	// S.DIREAD
 		setJMP(0x2111, sysvec + 3);	// S.FCI
 		setJMP(0x2114, sysvec + 4);	// S.SCI
@@ -379,7 +406,7 @@ public class VirtualHdos implements Computer, Memory,
 			setWORD(subbuf, usd);
 			usd += 101;
 			setWORD(s_path, usd);
-			setSTRING(usd, "SY0:");
+			setupPATH(usd);
 			usd += 101;
 			setWORD(s_prmt, usd);
 			mem[usd] = (byte)0;
@@ -393,6 +420,14 @@ public class VirtualHdos implements Computer, Memory,
 		}
 		lin = new BufferedReader(new InputStreamReader(System.in));
 		cmds.add(argv);
+	}
+
+	private void setupPATH(int buf) {
+		String s = "";
+		for (int n : paths) {
+			s += devs[n] + ':';
+		}
+		setSTRING(buf, s.toUpperCase());
 	}
 
 	private void setupTOD() {
@@ -703,8 +738,8 @@ public class VirtualHdos implements Computer, Memory,
 
 	private int doABS(HdosOpenFile of) {
 		try {
-			if (!of.open()) return -1;
-			if (of.read(secBuf, 0, 256) <= 0) return -1;
+			if (!of.open()) return -EC_FNF;
+			if (of.read(secBuf, 0, 256) <= 0) return -EC_RF;
 			// TODO: verify 0xff, 0x00?
 			int load = getWORD(secBuf, 2);
 			int len = getWORD(secBuf, 4);
@@ -712,7 +747,7 @@ public class VirtualHdos implements Computer, Memory,
 			System.arraycopy(secBuf, 8, mem, load, 256 - 8);
 			int lnext = load + 256 - 8;
 			int nnext = ((len + 8 + 255) & ~255) - 256;
-			if (of.read(mem, lnext , nnext) <= 0) return -1;
+			if (of.read(mem, lnext , nnext) < 0) return -EC_RF;
 			if (getWORD(s_usrm) < lnext + nnext) {
 				setWORD(s_usrm, lnext + nnext);
 			}
@@ -915,7 +950,7 @@ public class VirtualHdos implements Computer, Memory,
 			running = false;
 			return;
 		}
-		File path = mkFilePath(cmd);
+		File path = searchFilePath(cmd);
 		if (path == null) {
 			System.out.format("%s?\n", cmd);
 			running = false;
@@ -934,6 +969,7 @@ public class VirtualHdos implements Computer, Memory,
 		}
 		if (!ok) {
 			// TODO: take more-direct action?
+			//System.out.format("%s?? %d\n", path.getAbsolutePath(), entry);
 			running = false;
 			return;
 		}
@@ -1028,6 +1064,21 @@ public class VirtualHdos implements Computer, Memory,
 			if (fnc != 042) return false;
 		}
 		return true;
+	}
+
+	private File searchFilePath(String fn) {
+		File f;
+		if (fn.length() > 4 && fn.charAt(3) == ':') {
+			return mkFilePath(fn);
+		}
+		if (fn.indexOf('.') < 0) {
+			fn += ".abs";
+		}
+		for (int dx : paths) {
+			f = new File(dirs[dx], fn);
+			if (f.exists()) return f;
+		}
+		return null;
 	}
 
 	// defaults to SY0: and .ABS
@@ -1303,7 +1354,7 @@ public class VirtualHdos implements Computer, Memory,
 		}
 		entry = linkABS(fn);
 		if (entry < 0) {
-			error(EC_RF);
+			error(-entry);
 			return;
 		}
 		doPOP();
@@ -1439,6 +1490,11 @@ public class VirtualHdos implements Computer, Memory,
 		cpu.setRegDE(de);
 		cpu.setRegBC(0);
 		error(EC_OK);
+	}
+
+	private void doS_FASER() {
+		System.out.format("\n?02 Fatal system error!!\n");
+		running = false;
 	}
 
 	private void doS_GUP() {
@@ -1699,7 +1755,7 @@ public class VirtualHdos implements Computer, Memory,
 			String s = null;
 			switch (vec) {
 			case 0:	s = "S.SDD"; break;
-			case 1:	s = "S.FATSERR"; break; // Fatal System Error (halt)
+			case 1:	doS_FASER(); break; // Fatal System Error (halt)
 			case 2:	s = "S.DIREAD"; break;
 			case 3:	s = "S.FCI"; break;
 			case 4:	s = "S.SCI"; break;
