@@ -81,18 +81,17 @@ public class VirtualHdos implements Computer, Memory,
 	private long clock;
 	private byte[] mem;
 	private boolean running;
-	private boolean stopped;
-	private Semaphore stopWait;
-	private ReentrantLock cpuLock;
 	private Vector<String[]> cmds;
 	private Vector<Integer> paths;
 	private Map<Integer, String> errv;
+	private int[] ctlc;
 	private javax.swing.Timer timer;
 
 	private HdosOpenFile[] chans;
 	private String[] dirs;
 	private String root;
-	private BufferedReader lin;
+	private java.util.concurrent.LinkedBlockingDeque<Integer> fifo;
+	private ConsoleInput console;
 
 	static final int s_date = 0x20bf;	// (9) "DD-MMM-YY"
 	static final int s_datc = 0x20c8;	// (2) coded date
@@ -116,6 +115,7 @@ public class VirtualHdos implements Computer, Memory,
 	static final int s_prmt = 0x005c;	// (2) addr S.PRMT
 	static final int s_edlin = 0x005e;	// (2) addr S.EDLIN
 	static final int cslibuf = 0x003e;	// (2) addr CSLIBUF (not used?)
+	static final int eiret = 0x1ff9;	//
 
 	static final int hdosv = 0x0038; // the ONLY entry?
 	static final int stack = 0x2280;
@@ -216,15 +216,13 @@ public class VirtualHdos implements Computer, Memory,
 		String s;
 		int x;
 		running = false;
-		stopped = true;
-		stopWait = new Semaphore(0);
-		cpuLock = new ReentrantLock();
 		cmds = new Vector<String[]>();
 		paths = new Vector<Integer>();
 		dirs = new String[devs.length - 1];
 		chans = new HdosOpenFile[NCHAN];
 		mem = new byte[65536];
 		secBuf = new byte[512]; // at least 512...
+		ctlc = new int[3];
 		boolean silent = (props.getProperty("silent") != null);
 		String t = props.getProperty("vhdos_trace");
 		s = props.getProperty("vhdos_cpu");
@@ -418,7 +416,10 @@ public class VirtualHdos implements Computer, Memory,
 			// setWORD(s_lwa, ?); // never used?
 			mem[s_fmask] = (byte)(cpuType | 0x00); // not H19 - no ESC codes
 		}
-		lin = new BufferedReader(new InputStreamReader(System.in));
+		mem[eiret] = (byte)0xfb;
+		mem[eiret + 1] = (byte)0xc9;
+		fifo = new java.util.concurrent.LinkedBlockingDeque<Integer>();
+		console = new ConsoleInput();
 		cmds.add(argv);
 	}
 
@@ -488,7 +489,6 @@ public class VirtualHdos implements Computer, Memory,
 	public void reset() {
 		boolean wasRunning = running;
 		clock = 0;
-		stop();
 		cpu.reset();
 		if (wasRunning) {
 			start();
@@ -497,7 +497,6 @@ public class VirtualHdos implements Computer, Memory,
 
 	// These must NOT be called from the thread...
 	public void start() {
-		stopped = false;
 		if (running) {
 			return;
 		}
@@ -506,16 +505,9 @@ public class VirtualHdos implements Computer, Memory,
 		t.setPriority(Thread.MAX_PRIORITY);
 		t.start();
 	}
+	// Not used.
 	public void stop() {
-		stopWait.drainPermits();
-		if (!running) {
-			return;
-		}
 		running = false;
-		// This is safer than spinning, but still stalls the thread...
-		try {
-			stopWait.acquire();
-		} catch (Exception ee) {}
 	}
 	private void addTicks(int ticks) {
 	}
@@ -535,9 +527,10 @@ public class VirtualHdos implements Computer, Memory,
 	// Implementation must keep track of multi-byte instruction sequence,
 	// and other possible state. For IM0, Z80 will call as long as 'intrFetch' is true.
 	public int intrResp(Z80State.IntMode mode) {
-		// Construct RST instruction form irq.
-		int opCode = 0xc7 | (7 << 3);
-		// TODO: prevent accidental subsequent calls?
+		// The only INT here is for console input, use "3"
+		int irq = 3;
+		int opCode = 0xc7 | (irq << 3);
+		cpu.setINTLine(false);
 		return opCode;
 	}
 
@@ -977,26 +970,18 @@ public class VirtualHdos implements Computer, Memory,
 		setPage0(argv);
 		setWORD(0x211a, 1);	// S.MOUNT - is HDOS mounted?
 		cpu.setRegA(0);	// syscmd.sys needs this
-		cpu.setRegPC(entry);
+		doPUSH(entry);
+		cpu.setRegPC(eiret);
 	}
 
-	private int constat() {
-		int a = 0;
-		try {
-			if (lin.ready()) {
-				a = 255;
-			}
-		} catch (Exception ee) {}
-		return a;
+	private boolean constat() {
+		return fifo.size() > 0;
 	}
 
 	private int conin() {
 		int a = 0;
-		try {
-			// Alt + letter = (0x80 | ascii)
-			a = lin.read();
-			// TODO: how to pass a real ^J/LF?
-			//if (a == '\n') a = '\r';
+		if (fifo.size() > 0) try {
+			a = fifo.take();
 		} catch (Exception ee) {}
 		return a;
 	}
@@ -1461,6 +1446,13 @@ public class VirtualHdos implements Computer, Memory,
 		error(EC_OK);
 	}
 
+	private void doCTLC() {
+		int a = cpu.getRegA();
+		int hl = cpu.getRegHL();
+		if (a < 1 || a > 3) return;
+		ctlc[a - 1] = hl;
+	}
+
 	private int crc16(int crc, int val) {
 		int x;
 		int v = val;
@@ -1569,7 +1561,7 @@ public class VirtualHdos implements Computer, Memory,
 			doEXIT();
 			break;
 		case 1:	// .SCIN
-			if (constat() != 0) {
+			if (constat()) {
 				cpu.setRegA(conin());
 				cpu.setCarryFlag(false);
 			} else {
@@ -1622,8 +1614,8 @@ public class VirtualHdos implements Computer, Memory,
 			doLINK();
 			break;
 		case 041:	// .CTLC
-			// TODO: need to support this?
-			error(EC_OK);
+			doCTLC();
+			error(EC_OK);	// errors always ignored?
 			break;
 		case 042:	// .OPENR - read only
 		case 043:	// .OPENW - write only
@@ -1733,7 +1725,17 @@ public class VirtualHdos implements Computer, Memory,
 		//setJMP(hdosv, hdose);
 	}
 
+	// For now, only if Ctrl-C pressed
+	private void doIRQ3() {
+		if (ctlc[2] == 0) return;
+		doPUSH(0xffff); // need some token for return to ourself
+		doPUSH(ctlc[2]);
+		doPUSH(eiret);
+		// doRET() is next
+	}
+
 	// 1 = crash w/message, -1 = crash w/o msg, 0 = was handled
+	// If not fatal, returning causes doRET() (do not set PC directly).
 	private int checkTrap(int pc) {
 		if (pc == 0x0000 && vers >= 0x30 && syscmd &&
 				(mem[0] & 0xff) == 0xc3 &&
@@ -1741,10 +1743,19 @@ public class VirtualHdos implements Computer, Memory,
 			doPUSH(pc);	// for doRET()
 			return 0;
 		}
+		if (pc == 0xffff) { // return to IRQ3
+			fifo.add(0x03);	// send Ctrl-C
+			return 0;
+		}
 		if ((pc & ~0x0038) == 0) {
 			int irq = pc >> 3;
-			System.err.format("Crash RST%d\n", irq);
-			return -1;
+			if (irq == 3) {
+				doIRQ3();
+				return 0;
+			} else {
+				System.err.format("Crash RST%d\n", irq);
+				return -1;
+			}
 		}
 		if (pc == 0x002b) { // delay A * 2 mS
 			doDELAY();
@@ -1769,6 +1780,7 @@ public class VirtualHdos implements Computer, Memory,
 
 	//////// Runnable /////////
 	public void run() {
+		String xtra = null;
 		long clock = 0;
 		int clk = 0;
 		boolean tracing = false;
@@ -1783,10 +1795,15 @@ public class VirtualHdos implements Computer, Memory,
 				// Doing this early allows triggering off OS calls
 				if (trc != null) {
 					tracing = trc.preTrace(PC, clock);
+					if (tracing) {
+						xtra = String.format("%c%s",
+							cpu.isIE() ? '*' : ' ',
+							cpu.isINTLine() ? "INT" : "");
+					}
 				}
 				if (PC == hdosv) {
 					if (tracing) {
-						trc.postTrace(PC, clk, null);
+						trc.postTrace(PC, clk, xtra);
 					}
 					hdosTrap(PC);
 					if (!running) {
@@ -1797,6 +1814,11 @@ public class VirtualHdos implements Computer, Memory,
 					PC = cpu.getRegPC();
 					if (trc != null) {
 						tracing = trc.preTrace(PC, clock);
+					if (tracing) {
+						xtra = String.format("%c%s",
+							cpu.isIE() ? '*' : ' ',
+							cpu.isINTLine() ? "INT" : "");
+					}
 					}
 				}
 				if (PC >= hdose || PC < 0x1800) {
@@ -1813,7 +1835,7 @@ public class VirtualHdos implements Computer, Memory,
 				}
 				clk = cpu.execute();
 				if (tracing) {
-					trc.postTrace(PC, clk, null);
+					trc.postTrace(PC, clk, xtra);
 				}
 				if (vers >= 0x30 && done && !cpu.isIE() &&
 						PC == cpu.getRegPC()) {
@@ -1823,10 +1845,8 @@ public class VirtualHdos implements Computer, Memory,
 				clock += clk;
 			}
 		}
-		timer.stop();
+		if (timer != null) timer.stop();
 		if (coredump != null) dumpCore(coredump);
-		stopped = true;
-		stopWait.release();
 		System.out.format("\n");
 		// System.exit(exitCode);
 	}
@@ -1862,5 +1882,45 @@ public class VirtualHdos implements Computer, Memory,
 	public void actionPerformed(ActionEvent e) {
 		// only could be timer...
 		updateTOD();
+	}
+
+	class ConsoleInput implements Runnable {
+		private Thread thread;
+		private BufferedReader lin;
+		public ConsoleInput() {
+			lin = new BufferedReader(new InputStreamReader(System.in));
+			thread = new Thread(this);
+			thread.setDaemon(true); // so we can exit gracefully
+			thread.start();
+		}
+		private void processLine(String s) {
+			int x, c;
+			int n = s.length();
+			for (x = 0; x < n; ++x) {
+				c = s.charAt(x);
+				// Ctrl-C or Ctrl-X = CTLC
+				if (c == 0x03 || c == 0x18) {
+					// Ctrl-C goes immediately
+					cpu.setINTLine(true);
+					return; // discard rest
+				}
+				fifo.add(c);
+			}
+			fifo.add((int)'\n');
+		}
+		public void run() {
+			int c;
+			String s;
+			boolean gobble = false;
+			while (true) {
+				try {
+					s = lin.readLine();
+					if (s == null) break;
+					processLine(s);
+				} catch (Exception ee) {
+					break;
+				}
+			}
+		}
 	}
 }
