@@ -5,6 +5,7 @@ import java.util.Vector;
 import java.util.Map;
 import java.util.HashMap;
 import java.io.*;
+import java.awt.event.*;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.Properties;
@@ -13,7 +14,8 @@ import java.util.Calendar;
 import z80core.*;
 import z80debug.*;
 
-public class VirtualHdos implements Computer, Memory, Runnable {
+public class VirtualHdos implements Computer, Memory,
+		ActionListener, Runnable {
 	static final int NCHAN = 8;	// HDOS supports -1, 0, .. 5
 
 	static final int EC_OK = 0;	// no error
@@ -84,6 +86,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private ReentrantLock cpuLock;
 	private Vector<String[]> cmds;
 	private Map<Integer, String> errv;
+	private javax.swing.Timer timer;
 
 	private HdosOpenFile[] chans;
 	private String[] dirs;
@@ -93,6 +96,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	static final int s_date = 0x20bf;	// (9) "DD-MMM-YY"
 	static final int s_datc = 0x20c8;	// (2) coded date
 	static final int s_time = 0x20ca;	// (3+1) BCD HH:MM:SS (??)
+	static final int s_clktr = 0x20cd;	// (1) byte S.CLKTR
 	static final int s_himem = 0x20ce;	// (2) h/w hi-mem +1 (0xffff)
 	static final int s_sysm = 0x20d0;	// (2) FWA res sys (hdose)
 	static final int s_usrm = 0x20d2;	// (2) LWA usr (follows pgm)
@@ -270,6 +274,49 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		if (s != null) {
 			vers = Integer.decode(s) & 0xff;
 		}
+		for (x = 0; x < dirs.length; ++x) {
+			s = String.format("vhdos_drive_%s", devs[x]);
+			s = props.getProperty(s);
+			if (s != null) {
+				if (s.startsWith("${PWD}")) {
+					s = s.replaceFirst("\\$\\{PWD\\}", cwd);
+				} else if (s.startsWith("${HOME}")) {
+					s = s.replaceFirst("\\$\\{HOME\\}", home);
+				}
+				File f = new File(s);
+				// TODO: mkdir?
+				// if (!f.exists()) {
+				// 	try { f.mkdirs(); } catch (Exception ee) {}
+				// }
+				if (!f.exists() || !f.isDirectory()) {
+					System.err.format("Invalid path in %s: %s\n",
+						devs[x], s);
+					continue;
+				}
+				dirs[x] = s;
+			}
+		}
+		s = props.getProperty("vhdos_root_dir");
+		if (s == null) {
+			s = home + "/HostFileHdos";
+		}
+		root = s;
+		for (x = 0; x < dirs.length; ++x) {
+			if (dirs[x] != null) continue;
+			dirs[x] = String.format("%s/%s", root, devs[x]);
+			File f = new File(dirs[x]);
+			if (!f.exists()) {
+				try { f.mkdirs(); } catch (Exception ee) {}
+			}
+		}
+		s = System.getenv("VHDOSShow");
+		if (s != null && s.length() == 3) {
+			int dx = hdosDrive(s);
+			if (dx >= 0) {
+				System.out.println(dirs[dx]);
+			}
+			System.exit(0);
+		}
 
 		try {
 			String rom = "2716_444-19_H17.rom";
@@ -345,49 +392,6 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			mem[s_fmask] = (byte)(cpuType | 0x00); // not H19 - no ESC codes
 		}
 		lin = new BufferedReader(new InputStreamReader(System.in));
-		for (x = 0; x < dirs.length; ++x) {
-			s = String.format("vhdos_drive_%s", devs[x]);
-			s = props.getProperty(s);
-			if (s != null) {
-				if (s.startsWith("${PWD}")) {
-					s = s.replaceFirst("\\$\\{PWD\\}", cwd);
-				} else if (s.startsWith("${HOME}")) {
-					s = s.replaceFirst("\\$\\{HOME\\}", home);
-				}
-				File f = new File(s);
-				// TODO: mkdir?
-				// if (!f.exists()) {
-				// 	try { f.mkdirs(); } catch (Exception ee) {}
-				// }
-				if (!f.exists() || !f.isDirectory()) {
-					System.err.format("Invalid path in %s: %s\n",
-						devs[x], s);
-					continue;
-				}
-				dirs[x] = s;
-			}
-		}
-		s = props.getProperty("vhdos_root_dir");
-		if (s == null) {
-			s = home + "/HostFileHdos";
-		}
-		root = s;
-		for (x = 0; x < dirs.length; ++x) {
-			if (dirs[x] != null) continue;
-			dirs[x] = String.format("%s/%s", root, devs[x]);
-			File f = new File(dirs[x]);
-			if (!f.exists()) {
-				try { f.mkdirs(); } catch (Exception ee) {}
-			}
-		}
-		s = System.getenv("VHDOSShow");
-		if (s != null && s.length() == 3) {
-			int dx = hdosDrive(s);
-			if (dx >= 0) {
-				System.out.println(dirs[dx]);
-			}
-			System.exit(0);
-		}
 		cmds.add(argv);
 	}
 
@@ -411,6 +415,39 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		mem[s_time + 1] = (byte)mi;
 		mem[s_time + 2] = (byte)se;
 		mem[s_time + 3] = (byte)0;
+		timer = new javax.swing.Timer(1000, this);
+		timer.start();
+		mem[s_clktr] = (byte)0x01;
+	}
+
+	// return carry in 0x100 bit
+	private int bcdIncr60(int n) {
+		n += 1;
+		if ((n & 0x0f) > 0x09) n += 0x06;
+		if ((n & 0xf0) > 0x50) n += 0xa0;
+		return n;
+	}
+
+	// return carry in 0x100 bit
+	private int bcdIncr24(int n) {
+		n += 1;
+		if ((n & 0x0f) > 0x09) n += 0x06;
+		if (n > 0x23) n += 0xdd;
+		return n;
+	}
+
+	// add 1 second...
+	private void updateTOD() {
+		int n = bcdIncr60(mem[s_time + 2] & 0xff);
+		mem[s_time + 2] = (byte)n;
+		if (n < 0x100) return;
+		n = bcdIncr60(mem[s_time + 1] & 0xff);
+		mem[s_time + 1] = (byte)n;
+		if (n < 0x100) return;
+		n = bcdIncr24(mem[s_time + 0] & 0xff);
+		mem[s_time + 0] = (byte)n;
+		if (n < 0x100) return;
+		// TODO: overflow into date...
 	}
 
 	public void reset() {
@@ -514,7 +551,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 	private void setSTRING(int adr, String str) {
 		int x = str.length();
 		System.arraycopy(str.getBytes(), 0, mem, adr, x);
-		mem[x] = (byte)0;
+		mem[adr + x] = (byte)0;
 
 	}
 
@@ -1730,6 +1767,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 				clock += clk;
 			}
 		}
+		timer.stop();
 		if (coredump != null) dumpCore(coredump);
 		stopped = true;
 		stopWait.release();
@@ -1764,4 +1802,9 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 		}
 	}
 	// public String dumpDebug() { return ""; }
+
+	public void actionPerformed(ActionEvent e) {
+		// only could be timer...
+		updateTOD();
+	}
 }

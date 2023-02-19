@@ -1,31 +1,3 @@
-128CTL-C Struck
-129CTL-B Struck
-130Data Exhausted
-131Attempted Divide by Zero
-132Illegal Number Value
-133Illegal Usage
-134Data Lock Engaged
-135Cant Find Variable Mentioned in NEXT Statement
-136Floating Point Overflow (Number too Large)
-137No Corresponding GOSUB for this RETURN statement
-138String Length Exceeds 256 Characters
-139Illegal or Unknown Statement Number
-140Syntax Error
-141Type Conflict (Illegal Mix of String and Number Values)
-142Out of RAM Space
-143Subscript Out of Range
-144Too Many or Too Few Subscripts Supplied
-145This Array Was Not Dimensioned
-146An Illegal Character Was Encountered
-147Undefined Function
-148End
-149Stop
-150File Already Exists
-151Illegal Format for File Name
-152Too Many or Too Few Arguments Specified
-153File is not Open
-154Warning--Line Length Too Long, excess ignored.
-155Channel is Currently in Use
 000HEATH HDOS Issue #50.06.00  03-Nov-80
 001?02 End of File
 002?02 No Free Space on Media
@@ -70,3 +42,54 @@
 041?02 No Operating System Mounted, Required for this Operation.
 042?02 Illegal Overlay Index.
 043?02 Overlay Too Large.
+044File is locked against deletion.
+045Device Media is Fixed.
+046Illegal Load Address.
+047Device Not Loaded.
+048Device Not Locked in Memory.
+049Device is Fixed in Memory.
+050Illegal Date Format.
+051Illegal Time Format.
+052System Clock Not Resident.
+053System Disk is Reset.
+054Line Buffer Overflow.
+055Can't Unlink from Interupt Vector.
+056Permission NOT Given.
+128CTL-C Struck
+129CTL-B Struck
+130Data Exhausted
+131Attempted Divide by Zero
+132Illegal Number Value
+133Illegal Usage
+134Data Lock Engaged
+135Cant Find Variable Mentioned in NEXT Statement
+136Floating Point Overflow (Number too Large)
+137No Corresponding GOSUB for this RETURN statement
+138String Length Exceeds 256 Characters
+139Illegal or Unknown Statement Number
+140Syntax Error
+141Type Conflict (Illegal Mix of String and Number Values)
+142Out of RAM Space
+143Subscript Out of Range
+144Too Many or Too Few Subscripts Supplied
+145This Array Was Not Dimensioned
+146An Illegal Character Was Encountered
+147Undefined Function
+148End
+149Stop
+150File Already Exists
+151Illegal Format for File Name
+152Too Many or Too Few Arguments Specified
+153File is not Open
+154Warning--Line Length Too Long, excess ignored.
+155Channel is Currently in Use
+192Illegal TASK Function Code.
+193TASK is Already Active.
+194TASK is Not Active.
+195TASK Unknown to System.
+196TASK Table is Full.
+197TASK May Not be Deactivated.
+198Illegal Task Sequence Number.
+199Task Notification Failed.
+200Task is Too Large. (8K Limit)
+201File is Not Proper TASK Format.
