@@ -140,6 +140,7 @@ public class VirtualHdos implements Computer, Memory,
 	private int vers = 0x20;
 	private int cpuType = 0x80;	// Z80 by default
 	private boolean done = false;
+	private boolean debugIRQ = false;
 
 	static String home;
 	static String cwd;
@@ -1777,6 +1778,16 @@ public class VirtualHdos implements Computer, Memory,
 		return 1;
 	}
 
+	private String traceExtra() {
+		if (debugIRQ) {
+			return String.format("%c%s",
+				cpu.isIE() ? '*' : ' ',
+				cpu.isINTLine() ? "INT" : "");
+		} else {
+			return null;
+		}
+	}
+
 	//////// Runnable /////////
 	public void run() {
 		String xtra = null;
@@ -1795,9 +1806,7 @@ public class VirtualHdos implements Computer, Memory,
 				if (trc != null) {
 					tracing = trc.preTrace(PC, clock);
 					if (tracing) {
-						xtra = String.format("%c%s",
-							cpu.isIE() ? '*' : ' ',
-							cpu.isINTLine() ? "INT" : "");
+						xtra = traceExtra();
 					}
 				}
 				if (PC == hdosv) {
@@ -1813,11 +1822,9 @@ public class VirtualHdos implements Computer, Memory,
 					PC = cpu.getRegPC();
 					if (trc != null) {
 						tracing = trc.preTrace(PC, clock);
-					if (tracing) {
-						xtra = String.format("%c%s",
-							cpu.isIE() ? '*' : ' ',
-							cpu.isINTLine() ? "INT" : "");
-					}
+						if (tracing) {
+							xtra = traceExtra();
+						}
 					}
 				}
 				if (PC >= hdose || PC < 0x1800) {
