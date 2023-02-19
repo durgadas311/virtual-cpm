@@ -342,7 +342,7 @@ public class VirtualHdos implements Computer, Memory, Runnable {
 			setWORD(cslibuf, usd); // never used?
 			// usd += 101; // nothing follows
 			// setWORD(s_lwa, ?); // never used?
-			mem[s_fmask] = (byte)(cpuType | 0x10); // H19 - close enough
+			mem[s_fmask] = (byte)(cpuType | 0x00); // not H19 - no ESC codes
 		}
 		lin = new BufferedReader(new InputStreamReader(System.in));
 		for (x = 0; x < dirs.length; ++x) {
