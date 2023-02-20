@@ -18,12 +18,14 @@ public class HdosDirectoryFile extends HdosOpenFile {
 	private int pos;
 	private boolean nosys;
 	private boolean y2k;
+	private boolean hdos3;
 
 	public HdosDirectoryFile(File path, int fnc,
-			boolean nosys, boolean y2k) {
+			boolean nosys, boolean y2k, boolean hdos3) {
 		super(path, fnc);
 		this.nosys = nosys;
 		this.y2k = y2k;
+		this.hdos3 = hdos3;
 		// assert(fnc == 042);
 		// assert(path.isDirectory());
 		pos = 0;
@@ -42,8 +44,25 @@ public class HdosDirectoryFile extends HdosOpenFile {
 			int dt = cal.get(Calendar.DAY_OF_MONTH) |
 				((cal.get(Calendar.MONTH) + 1) << 5) |
 				((yr - 1970) << 9);
-			buf[off] = (byte)dt;
-			buf[off + 1] = (byte)(dt >> 8);
+			buf[off + 19] = (byte)dt;
+			buf[off + 20] = (byte)(dt >> 8);
+			if (hdos3) {
+				int hr = cal.get(Calendar.HOUR_OF_DAY);
+				int mi = cal.get(Calendar.MINUTE);
+				hr = ((hr / 10) << 4) | (hr % 10);
+				mi = ((mi / 10) << 4) | (mi % 10);
+				buf[off + 11] = (byte)hr;
+				buf[off + 12] = (byte)mi;
+				tm = attr.lastAccessTime().toMillis();
+				cal.setTimeInMillis(tm);
+				yr = cal.get(Calendar.YEAR);
+				if (!y2k && yr > 1999) yr = 1999; // HACK!
+				dt = cal.get(Calendar.DAY_OF_MONTH) |
+					((cal.get(Calendar.MONTH) + 1) << 5) |
+					((yr - 1970) << 9);
+				buf[off + 21] = (byte)dt;
+				buf[off + 22] = (byte)(dt >> 8);
+			}
 		} catch (Exception ee) {
 			return;
 		}
@@ -93,7 +112,7 @@ public class HdosDirectoryFile extends HdosOpenFile {
 		int len = (int)((f.length() + 255) / 256);
 		dir[ent + 16] = (byte)len;
 		dir[ent + 17] = (byte)(len >> 8);
-		setDate(f, dir, ent + 19);
+		setDate(f, dir, ent);
 		return e;
 	}
 

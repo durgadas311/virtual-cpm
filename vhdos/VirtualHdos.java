@@ -844,6 +844,11 @@ public class VirtualHdos implements Computer, Memory,
 		return String.format("%02d-%s-%04d", da, months[mo], yr);
 	}
 
+	private String getTime(byte[] buf, int idx) {
+		return String.format("  %02x:%02x ",
+				buf[idx] & 0xff, buf[idx + 1] & 0xff);
+	}
+
 	private void doTYPE(String[] argv) {
 		if (argv.length < 2) {
 			return;
@@ -882,10 +887,12 @@ public class VirtualHdos implements Computer, Memory,
 			return;
 		}
 		File dir = new File(dirs[dx]);
-		HdosDirectoryFile of = new HdosDirectoryFile(dir, 042, nosys, y2k);
+		HdosDirectoryFile of = new HdosDirectoryFile(dir, 042,
+						nosys, y2k, vers >= 0x30);
 		if (!of.open()) return;
 		String fn, fx;
-		System.out.format("NAME    .EXT   SIZE     DATE     FLAGS\n\n");
+		System.out.format("NAME    .EXT   SIZE     DATE%s   FLAGS\n\n",
+			vers >= 0x30 ? "      TIME" : "   ");
 		while (of.read(secBuf, 0, 512) > 0) {
 			for (x = 0; x < 0x1fa; x += 23) {
 				if ((secBuf[x] & 0xfe) == 0xfe) continue;
@@ -894,9 +901,10 @@ public class VirtualHdos implements Computer, Memory,
 				fx = new String(secBuf, x + 8, 3).replaceAll("\000", " ");
 				dx = getWORD(secBuf, x + 16);
 				System.out.format(
-					"%s.%s   %4d  %11s  %c %c\n",
+					"%s.%s   %4d  %11s%s  %c %c\n",
 					fn, fx, dx,
 					getDate(secBuf, x + 19),
+					vers >= 0x30 ? getTime(secBuf, x + 11) : " ",
 					(secBuf[x + 14] & DIF_SYS) != 0 ? 'S' : ' ',
 					(secBuf[x + 14] & DIF_WP) != 0 ? 'W' : ' ');
 			}
@@ -1273,7 +1281,8 @@ public class VirtualHdos implements Computer, Memory,
 		}
 		HdosOpenFile of;
 		if (path.getName().equals("direct.sys")) {
-			of = new HdosDirectoryFile(path.getParentFile(), fnc, nosys, y2k);
+			of = new HdosDirectoryFile(path.getParentFile(), fnc,
+						nosys, y2k, vers >= 0x30);
 		} else {
 			of = new HdosVirtualFile(path, fnc);
 		}
