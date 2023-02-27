@@ -623,6 +623,7 @@ public class VirtualHdos implements Computer, Memory,
 			s += argv[x].toUpperCase();
 		}
 		if (s.length() > 0) {
+			mem[--sp] = 0;
 			sp -= s.length();
 			System.arraycopy(s.getBytes(), 0, mem, sp, s.length());
 		}
