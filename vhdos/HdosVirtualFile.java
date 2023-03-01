@@ -7,14 +7,17 @@ public class HdosVirtualFile extends HdosOpenFile {
 	private RandomAccessFile fd;
 	private String rw;
 	private boolean closedf = true;
+	private boolean trunc;
 
 	public HdosVirtualFile(File path, int fnc) {
 		super(path, fnc);
+		trunc = false;
 		switch (fnc) {
 		case 042:	// .OPENR
 			rw = "r";
 			break;
 		case 043:	// .OPENW
+			trunc = true;
 		case 044:	// .OPENU
 		case 045:	// .OPENC
 			rw = "rw";
@@ -26,6 +29,9 @@ public class HdosVirtualFile extends HdosOpenFile {
 		try {
 			fd = new RandomAccessFile(file, rw);
 			closedf = false;
+			if (trunc) {
+				fd.setLength(0);
+			}
 		} catch (Exception ee) {
 			//System.err.format("open: %s\n", ee.getMessage());
 			return false;

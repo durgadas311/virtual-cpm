@@ -1330,7 +1330,7 @@ public class VirtualHdos implements Computer, Memory,
 		int bc = cpu.getRegBC();
 		int fl = chans[ch].length() / 256;
 		if (bc > fl) {
-			cpu.setRegBC(fl);
+			cpu.setRegBC(bc - fl);
 			error(EC_EOF);
 			return;
 		}
