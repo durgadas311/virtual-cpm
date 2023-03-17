@@ -215,6 +215,17 @@ public class VirtualHdos implements Computer, Memory,
 		vhdos.start();
 	}
 
+	private String expandPath(String path) {
+		if (path == null) return null;
+		if (path.startsWith("${PWD}")) {
+			return path.replaceFirst("\\$\\{PWD\\}", cwd);
+		} else if (path.startsWith("${HOME}")) {
+			return path.replaceFirst("\\$\\{HOME\\}", home);
+		} else {
+			return path;
+		}
+	}
+
 	public VirtualHdos(Properties props, String[] argv, String defdrv) {
 		String s;
 		int x;
@@ -283,13 +294,8 @@ public class VirtualHdos implements Computer, Memory,
 		}
 		for (x = 0; x < dirs.length; ++x) {
 			s = String.format("vhdos_drive_%s", devs[x]);
-			s = props.getProperty(s);
+			s = expandPath(props.getProperty(s));
 			if (s != null) {
-				if (s.startsWith("${PWD}")) {
-					s = s.replaceFirst("\\$\\{PWD\\}", cwd);
-				} else if (s.startsWith("${HOME}")) {
-					s = s.replaceFirst("\\$\\{HOME\\}", home);
-				}
 				File f = new File(s);
 				// TODO: mkdir?
 				// if (!f.exists()) {
@@ -303,7 +309,7 @@ public class VirtualHdos implements Computer, Memory,
 				dirs[x] = s;
 			}
 		}
-		s = props.getProperty("vhdos_root_dir");
+		s = expandPath(props.getProperty("vhdos_root_dir"));
 		if (s == null) {
 			s = home + "/HostFileHdos";
 		}
