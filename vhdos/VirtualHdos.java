@@ -1371,7 +1371,7 @@ public class VirtualHdos implements Computer, Memory,
 		int top = getWORD(s_sysm);
 		if (hl >= top) {
 			cpu.setRegHL(top);
-			//ec = EC_NEM; // no errors allowed?
+			ec = EC_NEM;
 		} else {
 			setWORD(s_usrm, hl);
 		}
