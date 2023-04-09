@@ -143,6 +143,7 @@ public class VirtualHdos implements Computer, Memory,
 	private int cpuType = 0x80;	// Z80 by default
 	private boolean done = false;
 	private boolean debugIRQ = false;
+	private boolean repExit = false; // report exitCode(s)
 
 	static String home;
 	static String cwd;
@@ -238,6 +239,7 @@ public class VirtualHdos implements Computer, Memory,
 		secBuf = new byte[512]; // at least 512...
 		ctlc = new int[3];
 		boolean silent = (props.getProperty("silent") != null);
+		repExit = (props.getProperty("vhdos_exit") != null);
 		String t = props.getProperty("vhdos_trace");
 		s = props.getProperty("vhdos_cpu");
 		if (s != null) {
@@ -1542,6 +1544,7 @@ public class VirtualHdos implements Computer, Memory,
 			cpu.setRegA(0);	// syscmd.sys needs this?
 			doPUSH(entry);	// doRET() will be called...
 		} else {
+			if (repExit) System.err.format("***Exit %d\n", exitCode);
 			running = false;
 		}
 	}
