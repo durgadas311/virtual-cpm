@@ -1052,7 +1052,7 @@ public class VirtualHdos implements Computer, Memory,
 			cpu.setRegDE(de + n);
 			cpu.setRegBC(bc - n);
 		}
-		if (n <= 0) {
+		if (n < bc) {
 			error(EC_EOF);
 		} else {
 			error(EC_OK);
@@ -1317,6 +1317,10 @@ public class VirtualHdos implements Computer, Memory,
 		int de = cpu.getRegDE();
 		int n = chans[ch].read(mem, de, bc);
 		checkRW(bc, de, n);
+//System.err.format("READ %d %-12s %04x %04x : %4d %c %02x %04x %04x\n",
+//ch, chans[ch].file.getName(), bc, de,
+//n, cpu.isCarryFlag() ? 'C' : '.',
+//cpu.getRegA(), cpu.getRegBC(), cpu.getRegDE());
 	}
 
 	private void doWRITE() {
