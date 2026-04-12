@@ -21,6 +21,9 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 	static final int useMSC = 0x10;
 	static final int passFCB = 0x20;
 
+	OutputStream lstOut;
+	OutputStream punOut;
+
 	private byte[] flags = {
 		(byte)(passUSR|passFCB),		// 15 - OPEN
 		(byte)(passUSR|passFCB),		// 16 - CLOSE
@@ -227,6 +230,18 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 		}
 		if (!silent) {
 			System.err.format("Using CPU %s\n", cpu.getClass().getName());
+		}
+		s = System.getenv("CPMList");
+		if (s != null) {
+			try {
+				lstOut = new FileOutputStream(s);
+			} catch (Exception ee) {}
+		}
+		s = System.getenv("CPMPunch");
+		if (s != null) {
+			try {
+				punOut = new FileOutputStream(s);
+			} catch (Exception ee) {}
 		}
 		lin = new BufferedReader(new InputStreamReader(System.in));
 		CpnetServer srv = new CpnetServer(props, "vcpm", 'P', (byte)0x00, 1, null);
@@ -1049,7 +1064,19 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 			break;
 		case 5:	// list
 			// TODO: implement bdosCall
+			if (lstOut != null) {
+				try {
+					lstOut.write(cpu.getRegC());
+				} catch (Exception ee) {}
+			}
+			break;
 		case 6:	// auxout
+			if (punOut != null) {
+				try {
+					punOut.write(cpu.getRegC());
+				} catch (Exception ee) {}
+			}
+			break;
 		case 7:	// auxin
 		// TODO: simulate disk I/O on boot tracks...
 		case 8:	// home
@@ -1125,8 +1152,21 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 		case 11: // const
 			hl = constat();
 			break;
-		case 3:	// auxin
+		case 5: // lstout
+			if (lstOut != null) {
+				try {
+					lstOut.write(e);
+				} catch (Exception ee) {}
+			}
+			break;
 		case 4:	// auxout
+			if (punOut != null) {
+				try {
+					punOut.write(e);
+				} catch (Exception ee) {}
+			}
+			break;
+		case 3:	// auxin
 		case 7:	// auxist
 		case 8:	// auxost
 		default:
@@ -1399,7 +1439,7 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 			warmBoot();
 			return;
 		}
-		if (fnc < 12 && fnc != 5) {
+		if (fnc < 12 && (lstOut != null || fnc != 5)) {
 			hl = bdosChar(fnc, de);
 		} else if (fnc == 12) {	// get version
 			hl = mem[SCB_VER] & 0xff;
