@@ -28,9 +28,12 @@ public class HostFileBdos implements NetworkServer {
 		public short fd_;
 		public FileLock flk;
 		public byte cr;
-		public int rr;
+		public int rr; // user's random record number
+		public int ir; // internal record number
 		public boolean dummy = false;
 		public boolean safe = false;
+		// 'of' may be null unless/until openFileFcb()/getFileFcb()
+		public OpenFile of;
 
 		// These could be implemented using Unix file modes.
 		public boolean ATTR_RO() { return attrs[8]; }
@@ -66,11 +69,126 @@ public class HostFileBdos implements NetworkServer {
 			Arrays.fill(attrs, false);
 		}
 
+		// Set FCB CR,EXT,S2 based on file pos 'r', size 'l' (recs)
+		public void setCrExtS2(int r, int rl) {
+			ir = r; // just to keep in sync
+			cr = (byte)(r & 0x7f);
+			r >>= 7; // num 16K extents
+			int xn = r;
+			ext = (byte)(r & 0x1f);
+			r >>= 5; // num modules
+			s2 = (byte)((s2 & 0x80) | (r & 0x3f));
+			rc = (byte)128; // assume common case
+			if (rl < 0) {
+				rl = 0;
+				if (of != null && of.fd != null) try {
+					rl = (int)((of.fd.length() + 127) / 128); // recs
+				} catch (Exception ee) { }
+			}
+			int xl = (rl + 127) / 128; // exts
+			if (xn >= xl) rc = 0;
+			else if (xn + 1 == xl) rc = (byte)(rl & 0x7f);
+			/* else if (xn < xl) rc = 128 */
+		}
+
+		// Set FCB CR,EXT,S2 based on 'ir'
+		public void setCrExtS2() {
+			setCrExtS2(ir, -1);
+		}
+
+		// Set FCB CR,EXT,S2 based on file position 'r' (recs)
+		public void setCrExtS2(int r) {
+			if (r >= maxCpmRecs) {
+				r = (int)(maxCpmRecs - 1);
+			}
+			setCrExtS2(r, -1);
+		}
+
+		// Honor EXT and S2 during OPEN (S2 was set to 0).
+		// CR is undefined at this point.
+		public boolean setOpenPos(long len) {
+			len = (len + 127) / 128;	// num records
+			ir = s2 & 0x3f; // module num
+			ir <<= 5;
+			ir += ext & 0x1f; // extent num
+			ir <<= 7;	// base record num, assume CR=0
+			if (ir >= maxCpmRecs) return true; // no extent exists
+			if (ir > 0 && ir >= len) return true; // no extent exists
+			if ((ir + 127) / 128 == len / 128) {
+				rc = (byte)(len & 0x7f);
+			} else {
+				rc = (byte)128;
+			}
+			s1 = 0;
+			s2 |= (byte)0x80;	// flag if close needs to update...
+			return false;
+		}
+
+		public int getSeqPos() {
+			int r = s2 & 0x3f; // num modules
+			r <<= 5;
+			r += ext & 0x1f; // num extents
+			r <<= 7;
+			if ((cr & 0xff) < 0x80) {
+				r += cr; // num records
+			} else { // refers to next extent
+				r += 0x80;
+			}
+			return r; // num records
+		}
+
+		// Set file position based on FCB fields
+		// Returns 'false' if seek error (06 Random record number out of range)
+		public boolean seekSeq() {
+			if (of == null || of.fd == null) {
+				return false;
+			}
+			ir = s2 & 0x3f; // num modules
+			ir <<= 5;
+			ir += ext & 0x1f; // num extents
+			ir <<= 7;
+			if ((cr & 0xff) < 0x80) {
+				ir += cr; // num records
+			} else { // go to next extent
+				ir += 0x80;
+				cr = 0;
+				if (ir >= maxCpmRecs) return false; // seek error
+				setCrExtS2(); // update FCB fields
+			}
+			try {
+				of.fd.seek((long)ir << 7);
+			} catch (Exception ee) {
+				return false;
+			}
+			return true;
+		}
+
+		// Set file position based on FCB RR field
+		// Returns 'false' if seek error (06 Random record number out of range)
+		public boolean seekRnd() {
+			if (of == null) {	// should never happen
+				of = getFileFcb(this);
+			}
+			if (of == null || of.fd == null) {
+				return false;
+			}
+			ir = rr;
+			if (ir >= maxCpmRecs) return false; // seek error
+			try {
+				of.fd.seek((long)ir << 7);
+			} catch (Exception ee) {
+				return false;
+			}
+			setCrExtS2();
+			return true;
+		}
+
 		public cpmFcb() {
 			clearIntfAttrs();
 			fd = fd_ = 0; // invalid
 		}
 
+		// Called at start of BDOS call to get user's FCB.
 		public cpmFcb(byte[] buf, int start) {
 			drv = buf[start++];
 			byte[] nam = new byte[11];
@@ -97,7 +215,16 @@ public class HostFileBdos implements NetworkServer {
 			cr = buf[start++];
 			rr = buf[start++] & 0xff;
 			rr = rr | ((buf[start++] & 0xff) << 8);
+			// can't really check overflow, callers should not care
+			// or check later.
 			rr = rr | ((buf[start++] & 0xff) << 16);
+			// CR/S2 may not be initialized (OPEN), but later call
+			// in OPEN will adjust for that.
+			ir = s2 & 0x3f; // module num
+			ir <<= 5;
+			ir += ext & 0x1f; // extent num
+			ir <<= 7;	// base record num
+			ir += cr & 0x7f;
 		}
 
 		public void put(byte[] buf, int start) {
@@ -132,7 +259,7 @@ public class HostFileBdos implements NetworkServer {
 				buf[start++] = cr;
 				buf[start++] = (byte)(rr & 0xff);
 				buf[start++] = (byte)((rr >> 8) & 0xff);
-				buf[start++] = (byte)((rr >> 16) & 0xff);
+				buf[start++] = (byte)((rr >> 16) & 0x03);
 			}
 		}
 
@@ -157,7 +284,7 @@ public class HostFileBdos implements NetworkServer {
 			if (rand) {
 				buf[start++] = (byte)(rr & 0xff);
 				buf[start++] = (byte)((rr >> 8) & 0xff);
-				buf[start++] = (byte)((rr >> 16) & 0xff);
+				buf[start++] = (byte)((rr >> 16) & 0x03);
 			}
 		}
 
@@ -184,6 +311,21 @@ public class HostFileBdos implements NetworkServer {
 	static final byte COMPAT_PC = 0b01000000;	// Partial CLOSE for all
 	static final byte COMPAT_NCC = 0b00100000;	// No checksum on CLOSE
 	static final byte COMPAT_NCS = 0b00010000;	// No checksum ever
+	static final byte COMPAT_HDOS = 0b00000001;	// In aux compat byte
+	// Only honor a few bits...
+	static final byte COMPAT_SUPP = (COMPAT_PRO | COMPAT_PC);
+	static final byte COMPAT_AUX = (COMPAT_HDOS);
+
+	// NOTE:
+	// CP/M 1.4 used 4 bits in ext for max file size 256K.
+	// CP/M 2.2 used 5 bits in ext and 4 bits in s2 for
+	//	a max file size of 8M.
+	// CP/M 3 and MP/M-II used 5 bits in ext and 6 bits in s2
+	//	for a max file size of 32M.
+	static final long maxCpmRecs = 32 * 64 * 128; // largest for MP/M-II and CP/M-3
+	static final long maxCpmFile = maxCpmRecs * 128; // largest for MP/M-II and CP/M-3
+
+	private byte fill = 0x1a;
 
 	private void unix2cpmdate(long time, byte[] buf, int start, boolean secs) {
 		time += tz.getOffset(time);
@@ -358,7 +500,8 @@ public class HostFileBdos implements NetworkServer {
 		public boolean full;
 		public boolean cpm3;
 		public byte bc;
-		public long size;
+		public int size; // total len in records
+		public int curr; // current extent pos, records
 		public boolean rw;
 		public boolean ex;
 		public cpmFind find = new cpmFind();
@@ -432,6 +575,7 @@ public class HostFileBdos implements NetworkServer {
 
 	class OpenFile {
 		public RandomAccessFile fd;
+		public byte s2;
 		public byte ext;
 		public byte cr;
 		public FileLock flk;
@@ -1035,27 +1179,15 @@ public class HostFileBdos implements NetworkServer {
 			// create fake info in FCB to fool caller into
 			// thinking the file is of about the right size.
 			// This does not account for sparse files.
-			long len = curSearch.size;	// len in bytes
-			if (len <= phyExt * 128) {
-				curSearch.size = 0;
-			} else {
-				curSearch.size -= phyExt * 128;
+			nb = ((curSearch.size - curSearch.curr) + curDpb.blm) >> curDpb.bsh;
+			if (nb > 16) nb = 16;
+			curSearch.curr += phyExt;
+			if (curSearch.curr > curSearch.size) {
+				curSearch.curr = curSearch.size;
 			}
-			len = (len + 127) / 128;	// len in records
-			// STAT only cares about (ext & exm), so actually ext can wrap.
-			// But, (ext & exm) must reflect the number of
-			// logical extents in this dirent.
-			int x;
-			if (len <= phyExt) {
-				nb = (int)((len + curDpb.blm) >> curDpb.bsh);
-				fcb.ext = (byte)(len / 128);	// num logical extents
-				fcb.rc = (byte)(len & 0x7f);
-				if (len > 0 && fcb.rc == 0) {
-					fcb.rc = (byte)128;
-				}
-			} else {
-				fcb.ext = curDpb.exm;	// should have advancing num in hi bits
-				fcb.rc = (byte)128;
+			fcb.setCrExtS2(curSearch.curr - 1, curSearch.size);
+			if (curSearch.curr == curSearch.size) {
+				curSearch.size = 0; // terminate this file
 			}
 		}
 		fcb.s1 = curSearch.bc;
@@ -1084,7 +1216,7 @@ public class HostFileBdos implements NetworkServer {
 				return "!";
 			}
 		}
-		if (search.ext == '?' && search.size > 0) {
+		if (search.ext == '?' && curSearch.curr < search.size) {
 			// copyOutSearch() should ensure we don't keep landing here,
 			// but caller MUST invoke copyOutSearch() each time.
 			return cpmNameFound(search.find);
@@ -1097,7 +1229,9 @@ public class HostFileBdos implements NetworkServer {
 		// should never fail since we just got filename from directory...
 		File fi = new File(cpmPathFound(search.find));
 		if (search.ext == '?') {
-			search.size = fi.length();
+			search.size = (int)((fi.length() + 127) / 128);
+			if (search.size > maxCpmRecs) search.size = (int)maxCpmRecs;
+			search.curr = 0;
 		}
 		search.bc = (byte)(fi.length() & 0x7f);
 		search.rw = fi.canWrite();
@@ -1164,7 +1298,7 @@ public class HostFileBdos implements NetworkServer {
 		if (d == '?') {
 			search.full = true;
 			search.cpm3 = ((fcb.drv & 0x80) != 0); // CP/M 3 sets hi bit
-			search.ext = '?';
+			search.ext = '?'; // implies S2='?'
 			search.maxdc = (byte)(search.cpm3 ? 3 : 4);
 			d = (byte)curDsk;
 			pat = "???????????";
@@ -1184,24 +1318,6 @@ public class HostFileBdos implements NetworkServer {
 		//System.err.format("Searching \"%s\" user %d drive %c\n", pat, u, 'A'+d);
 		cpmFindInit(search, pat);
 		return commonSearch(search);
-	}
-
-	void seekFile(cpmFcb fcb, OpenFile of) {
-		if (of == null) {
-			of = getFileFcb(fcb);
-			if (of == null) {
-				return;
-			}
-		}
-		long r = fcb.rr;
-		// TODO: update fcb.ext
-		r *= 128;
-		try {
-			of.fd.seek(r);
-		} catch (Exception ee) {}
-		fcb.s1 = fcb.cr;
-		of.ext = fcb.ext;
-		of.cr = fcb.cr;
 	}
 
 	int newFileFcb() {
@@ -1232,6 +1348,7 @@ public class HostFileBdos implements NetworkServer {
 	}
 
 	void putFileFcb(cpmFcb fcb, int ix, RandomAccessFile fd, byte drv, FileLock flk) {
+		fcb.of = openFiles[ix];
 		openFiles[ix].fd = fd;
 		openFiles[ix].flk = flk;
 		if (fd == null) {
@@ -1270,24 +1387,28 @@ public class HostFileBdos implements NetworkServer {
 	OpenFile getFileFcb(cpmFcb fcb) {
 		int x = locFileFcb(fcb);
 		if (x < 0) {
-			return null;
+			fcb.of = null;
+		} else {
+			fcb.of = openFiles[x];
 		}
-		return openFiles[x];
+		return fcb.of;
 	}
 	OpenFile getFileWrFcb(cpmFcb fcb) {
 		int x = locFileFcb(fcb);
 		if (x < 0) {
-			return null;
-		}
-		if ((openFiles[x].drv & curROVec) != 0) {
+			fcb.of = null;
+		} else if ((openFiles[x].drv & curROVec) != 0) {
 			// TODO: return -2;
-			return null;
+			fcb.of = null;
+		} else {
+			fcb.of = openFiles[x];
 		}
-		return openFiles[x];
+		return fcb.of;
 	}
 
 	// Returns CP/M File Id, or -1 on error.
 	int closeFileFcb(cpmFcb fcb) {
+		fcb.of = null;
 		int x = locFileFcb(fcb);
 		if (x < 0) {
 			return -1;
@@ -1334,6 +1455,13 @@ public class HostFileBdos implements NetworkServer {
 				return -1;
 			}
 		}
+		long len = fi.length();
+		if (fcb.setOpenPos(len)) {
+			return -1; // could not open "extent" requested
+		}
+		if ((fcb.cr & 0xff) == 0xff) {
+			fcb.cr = (byte)(len & 0x7f); // byte count
+		}
 		if (!fi.canWrite()) {
 			flags = "r";
 		}
@@ -1377,15 +1505,6 @@ public class HostFileBdos implements NetworkServer {
 		if (!fi.canWrite()) {
 			fcb.SET_RO();
 		}
-		//fcb.ext = 0; // must honor open extent
-		long len = fi.length();
-		len = (len + 127) / 128;	// num records
-		fcb.rc = (byte)(len > 127 ? 128 : (len & 0x7f));
-		if ((fcb.cr & 0xff) == 0xff) {
-			fcb.cr = (byte)(fi.length() & 0x7f); // byte count
-		}
-		fcb.s1 = 0;
-		fcb.s2 = (byte)0x80;	// flag if close needs to update...
 		return x;	// "File ID"
 	}
 
@@ -1535,6 +1654,10 @@ public class HostFileBdos implements NetworkServer {
 
 	private int openFile(byte[] msgbuf, int start, int len) {
 		byte u = (byte)(msgbuf[start] & 0x1f);
+		// Some programs (e.g. MAC) have garbage in S1, S2.
+		// Must zero S2 (modnum), as done by BDOS.
+		// CR is in unknown state.
+		msgbuf[fcbadr + 14] = (byte)0; // clrmodnum
 		cpmFcb fcb = new cpmFcb(msgbuf, fcbadr);
 		msgbuf[start] = (byte)0;
 		// ignore password...
@@ -1564,16 +1687,19 @@ public class HostFileBdos implements NetworkServer {
 			return 1;
 		}
 		msgbuf[start] = (byte)0;
-		if (fcb.s2 == 0) {
-			// special truncate for SUBMIT (CCP).
-			// But some others end up here, so must beware.
-			long ln = fcb.cr & 0xff;
-			ln += fcb.ext * 128;
-			ln *= 128;
+		if ((fcb.s2 & 0x80) == 0) {
+			// Special truncate for SUBMIT (CCP), which overrides
+			// (decrements) FCB.RC and clears FCB.S2 bit 7 ("fwf").
+			//
+			// The traditional BDOS clears S2 bit 7 on all
+			// actions that alter the FCB (directory entry).
+			// This server does not, so nothing should land
+			// here accidentally.
+			int r = fcb.getSeqPos();
 			try {
-				of.fd.setLength(ln);
+				of.fd.setLength((long)r << 7);
 			} catch (Exception ee) {
-				System.err.format("SUBMIT truncate %d\n", ln);
+				System.err.format("SUBMIT truncate %d\n", r);
 			}
 		}
 		int rc = 0;
@@ -1764,43 +1890,27 @@ public class HostFileBdos implements NetworkServer {
 			return 1;
 		}
 		int rc = 0;
-		try {
-			if ((fcb.ext == 0 && fcb.cr == 0) ||
-					fcb.ext != of.ext ||
-					fcb.cr != of.cr) {
-				long ln = fcb.cr & 0xff;
-				ln += fcb.ext * 128;
-				ln *= 128;
-				of.fd.seek(ln);
+		if (fcb.seekSeq()) {
+			try {
+				rc = of.fd.read(msgbuf, dmaadr, 128);
+				if (rc < 0) rc = 0;
+			} catch (Exception ee) {
+				rc = -1;
 			}
-			rc = of.fd.read(msgbuf, dmaadr, 128);
-			if (rc < 0) {
-				rc = 0;
-			}
-		} catch (Exception ee) {
-			rc = -1;
-		}
-		if ((fcb.cr & 0xff) > 127) {
-			fcb.cr = 0; // cr
-			++fcb.ext;
-			fcb.ext &= 0x1f;
 		}
 		if (rc < 0) {
 			msgbuf[start] = (byte)255;
 			return 1;
 		}
 		if (rc == 0) {
-			msgbuf[start] = (byte)1;
+			msgbuf[start] = (byte)1; // EOF
 			return 1;
 		}
-		++fcb.cr;
-		fcb.s1 = fcb.cr;
-		of.ext = fcb.ext;
-		of.cr = fcb.cr;
+		++fcb.cr; // worst case, 0x80 corrected next time
 		//traceFcb("rd", fcb, of);
 		fcb.putIO(msgbuf, fcbadr, false);
 		// fill any partial "sector" with Ctrl-Z, in case it's text.
-		Arrays.fill(msgbuf, dmaadr + rc, dmaadr + 128, (byte)0x1a);
+		Arrays.fill(msgbuf, dmaadr + rc, dmaadr + 128, fill);
 		// detect media change?
 		return 165;
 	}
@@ -1822,34 +1932,15 @@ public class HostFileBdos implements NetworkServer {
 			//}
 		}
 		int rc = 0;
-		try {
-			if ((fcb.ext == 0 && fcb.cr == 0) ||
-					fcb.ext != of.ext ||
-					fcb.cr != of.cr) {
-				long ln = fcb.cr & 0xff;
-				ln += fcb.ext * 128;
-				ln *= 128;
-				of.fd.seek(ln);
+		if (fcb.seekSeq()) {
+			try {
+				of.fd.write(msgbuf, dmaadr, 128);
+				rc = 128;
+			} catch (Exception ee) {
+				rc = -1;
 			}
-			of.fd.write(msgbuf, dmaadr, 128);
-			rc = 128;
-		} catch (Exception ee) {
-			rc = -1;
 		}
-		if ((fcb.cr & 0xff) > 127) {
-			fcb.cr = 0;
-			fcb.rc = 0;
-			++fcb.ext;
-			fcb.ext &= 0x1f;
-		}
-		++fcb.cr;
-		fcb.s1 = fcb.cr;
-		of.ext = fcb.ext;
-		of.cr = fcb.cr;
 		//traceFcb("wr", fcb, of);
-		if ((fcb.rc & 0xff) < (fcb.cr & 0xff)) {
-			fcb.rc = fcb.cr;
-		}
 		if (rc < 0) {
 			msgbuf[start] = (byte)255;
 			return 1;
@@ -1858,7 +1949,7 @@ public class HostFileBdos implements NetworkServer {
 			msgbuf[start] = (byte)1;
 			return 1;
 		}
-		// fcb.s2 = 0; // don't need this here...
+		++fcb.cr; // worst case, 0x80 corrected next time
 		// detect media change?
 		fcb.putIO(msgbuf, fcbadr, false);
 		return 37;
@@ -1867,6 +1958,10 @@ public class HostFileBdos implements NetworkServer {
 	// File is open on successful return.
 	private int createFile(byte[] msgbuf, int start, int len) {
 		byte u = (byte)(msgbuf[start] & 0x1f);
+		// Some programs (e.g. MAC) have garbage in S1, S2.
+		// Must zero S2 (modnum), as done by BDOS.
+		// CR is in unknown state.
+		msgbuf[fcbadr + 14] = (byte)0; // clrmodnum
 		cpmFcb fcb = new cpmFcb(msgbuf, fcbadr);
 		msgbuf[start] = (byte)0;
 		int rc = makeFileFcb(fcb, u);
@@ -1921,7 +2016,10 @@ public class HostFileBdos implements NetworkServer {
 			msgbuf[start] = (byte)9;
 			return 1;
 		}
-		seekFile(fcb, of);
+		if (!fcb.seekRnd()) {
+			msgbuf[start] = (byte)6;
+			return 1;
+		}
 		if (dmaadr >= 0) {
 			int rc = 0;
 			try {
@@ -1932,7 +2030,7 @@ public class HostFileBdos implements NetworkServer {
 			} catch (Exception ee) {
 				rc = -1;
 			}
-			seekFile(fcb, of);
+			fcb.seekRnd(); // stay at same record
 			if (rc < 0) {
 				msgbuf[start] = (byte)255;
 				return 1;
@@ -1941,7 +2039,7 @@ public class HostFileBdos implements NetworkServer {
 				msgbuf[start] = (byte)1;
 				return 1;
 			}
-			Arrays.fill(msgbuf, dmaadr + rc, dmaadr + 128, (byte)0x1a);
+			Arrays.fill(msgbuf, dmaadr + rc, dmaadr + 128, fill);
 		}
 		// detect media change?
 		fcb.putIO(msgbuf, fcbadr, true);
@@ -1964,7 +2062,10 @@ public class HostFileBdos implements NetworkServer {
 				return 1;
 			//}
 		}
-		seekFile(fcb, of);
+		if (!fcb.seekRnd()) {
+			msgbuf[start] = (byte)6;
+			return 1;
+		}
 		int rc = 0;
 		try {
 			of.fd.write(msgbuf, dmaadr, 128);
@@ -1972,7 +2073,7 @@ public class HostFileBdos implements NetworkServer {
 		} catch (Exception ee) {
 			rc = -1;
 		}
-		seekFile(fcb, of);
+		fcb.seekRnd(); // stay at same record
 		if (rc < 0) {
 			msgbuf[start] = (byte)255;
 			return 1;
@@ -1995,16 +2096,13 @@ public class HostFileBdos implements NetworkServer {
 			msgbuf[start] = (byte)9;
 			return 1;
 		}
-		long r = 0;
-		try {
-			r = of.fd.getFilePointer();
-		} catch (Exception ee) {}
-		if (r > 0x03ffff * 128) {
-			r = 0x03ffff;
-		} else {
-			r = (r + 127) / 128;
+		int r = fcb.getSeqPos();
+		if (r >= maxCpmRecs) {
+			// Theoretically, position can't overflow.
+			// But files could be too large for CP/M.
+			r = (int)(maxCpmRecs - 1);
 		}
-		fcb.rr = (int)r;
+		fcb.rr = r;
 		fcb.putIO(msgbuf, fcbadr, true);
 		return 37;
 	}
@@ -2029,8 +2127,9 @@ public class HostFileBdos implements NetworkServer {
 			}
 			r = fi.length();
 		}
-		if (r > 0x03ffff * 128) {
-			r = 0x03ffff;
+		if (r > maxCpmFile) {
+			// Silently truncate to CP/M max
+			r = maxCpmRecs;
 		} else {
 			r = (r + 127) / 128;
 		}
@@ -2046,13 +2145,13 @@ public class HostFileBdos implements NetworkServer {
 		if (bc == 0) {
 			bc = 128;
 		}
-		// file must not be open?
-		OpenFile of = getFileFcb(fcb);
-		if (of != null) {
-			msgbuf[start] = (byte)0xff;
-			msgbuf[start + 1] = (byte)0; // TODO: more error codes?
-			return 2;
-		}
+		// TODO: file must not be open by ANOTHER process, or unlocked.
+		// OpenFile of = getFileFcb(fcb);
+		// if (of != null && ...) {
+			// msgbuf[start] = (byte)0xff;
+			// msgbuf[start + 1] = (byte)5;
+			// return 2;
+		// }
 		fileName = getFileName(fcb);
 		pathName = cpmPath(fcb.getDrv(), u, fileName);
 		File fi = new File(pathName);
@@ -2127,6 +2226,8 @@ public class HostFileBdos implements NetworkServer {
 		return recLocking(msgbuf, start, len, false);
 	}
 	private int getFreeSp(byte[] msgbuf, int start, int len) {
+		// TODO: This could return maxCpmFile... but then
+		// it is inconsistent with GET ALV/DPB stats.
 		int cap = ((curDpb.dsm + 1) << curDpb.bsh);
 		//System.err.format("DISK FREE SPACE %06x\n", cap);
 		msgbuf[start] = (byte)(cap & 0xff);
@@ -2153,31 +2254,37 @@ public class HostFileBdos implements NetworkServer {
 		msgbuf[start] = (byte)0;
 		return 1;
 	}
+	// MP/M-II does not define this function
 	private int truncFile(byte[] msgbuf, int start, int len) {
 		int rc;
 		byte u = (byte)(msgbuf[start] & 0x1f);
 		cpmFcb fcb = new cpmFcb(msgbuf, fcbadr);
 		msgbuf[start] = (byte)0;
+		// CP/M-3 requires the file to be closed, but does not enforce it
 		OpenFile of = getFileWrFcb(fcb);
 		if (of != null) {
 			msgbuf[start] = (byte)0xff;
-			msgbuf[start + 1] = (byte)0; // TODO: more error codes?
+			msgbuf[start + 1] = (byte)5;
 			return 2;
 		}
 		byte d = fcb.getDrv();
 		fileName = getFileName(fcb);
 		pathName = cpmPath(d, u, fileName);
 		File fi = new File(pathName);
+		if (!fi.exists()) {
+			msgbuf[start] = (byte)0xff;
+			return 1;
+		}
 		if (!fi.canWrite()) {
 			msgbuf[start] = (byte)0xff;
-			msgbuf[start + 1] = (byte)(!fi.exists() ? 0 : 3);
+			msgbuf[start + 1] = (byte)3;
 			return 2;
 		}
 		long r = fcb.rr;
 		if (r > fi.length()) {
+			// This is the same as "file not found"
 			msgbuf[start] = (byte)0xff;
-			msgbuf[start + 1] = (byte)0x00;
-			return 2;
+			return 1;
 		}
 		try {
 			RandomAccessFile fd = new RandomAccessFile(fi, "rw");
@@ -2185,7 +2292,7 @@ public class HostFileBdos implements NetworkServer {
 			fd.close();
 		} catch (Exception ee) {
 			msgbuf[start] = (byte)0xff;
-			msgbuf[start + 1] = (byte)0xff;
+			msgbuf[start + 1] = (byte)1; // Disk I/O error is closest
 			return 2;
 		}
 		// TODO: need to update ext,rc,cr? file is not open... as far as we know.
@@ -2207,7 +2314,15 @@ public class HostFileBdos implements NetworkServer {
 		return 1;
 	}
 	private int setCompAttrs(byte[] msgbuf, int start, int len) {
-		curCompat = msgbuf[start] & (COMPAT_PRO | COMPAT_PC); // only honor a couple bits...
+		curCompat = msgbuf[start] & COMPAT_SUPP;
+		if ((msgbuf[NetworkServer.SIZ] & 0xff) > 0) {
+			curCompat |= (msgbuf[start + 1] & COMPAT_AUX);
+		}
+		if ((curCompat & COMPAT_HDOS) != 0) {
+			fill = (byte)0;
+		} else {
+			fill = (byte)0x1a;
+		}
 		msgbuf[start] = (byte)0;
 		return 1;
 	}
@@ -2246,8 +2361,7 @@ public class HostFileBdos implements NetworkServer {
 		File fi = new File(pathName);
 		if (!fi.exists()) {
 			msgbuf[start] = (byte)0xff;
-			msgbuf[start + 1] = (byte)0x00;
-			return 2;
+			return 1;
 		}
 		msgbuf[fcbadr + 12] = (byte)0; // ext: no passwords
 		BasicFileAttributes attrs = getAttrs(pathName);
