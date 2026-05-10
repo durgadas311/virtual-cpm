@@ -77,6 +77,8 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 	private CPUTracer trc;
 	private long clock;
 	private byte[] mem;
+	private int cpmtop = 0x10000;	// 64K
+	private boolean isis;
 	private boolean running;
 	private boolean stopped;
 	private Semaphore stopWait;
@@ -92,32 +94,37 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 	static final int fcb2 = fcb1 + 16;
 	static final int defdma = 0x0080;
 	static final int tpa = 0x0100;
-	static final int biose = 0xff00;
-	static final int nbios = 33;
-	static final int wboot = biose + 3;
-	static final int memtop = biose - 512;	// need space for ALV
-	static final int bdose = memtop + 6;
-	static final int dpbuf = bdose + 3;
-	static final int alvbf = dpbuf + 17;
-	static final int scb = biose + (nbios * 3);	// requires 100 bytes
+	// These are all dynamic, based off 'cpmtop'
+	private int biose;	// cpmtop - 256
+	private int nbios;
+	private int wboot;
+	private int memtop;	// need space for ALV
+	private int bdose;
+	private int dpbuf;
+	private int alvbf;
+	private int scb;	// requires 100 bytes
 
 	// SCB addresses used internally
-	static final int SCB_VER = scb + 0x05;
-	static final int SCB_PGMRET = scb + 0x10;
-	static final int SCB_CONWID = scb + 0x1a;
-	static final int SCB_CONLEN = scb + 0x1c;
-	static final int SCB_PMODE = scb + 0x2c;
-	static final int SCB_CMODE = scb + 0x33;
-	static final int SCB_OUTDLM = scb + 0x37;
-	static final int SCB_SCBADD = scb + 0x3a; // base address of SCB
-	static final int SCB_DMAAD = scb + 0x3c;
-	static final int SCB_DRV = scb + 0x3e;
-	static final int SCB_USER = scb + 0x44;
-	static final int SCB_MULTCNT = scb + 0x4a;
-	static final int SCB_ERRMD = scb + 0x4b;
-	static final int SCB_DSO = scb + 0x4c;
-	static final int SCB_TMP = scb + 0x50;
-	static final int SCB_DATE = scb + 0x58; // date,hours,min,sec
+	private int SCB_VER;
+	private int SCB_PGMRET;
+	private int SCB_CONWID;
+	private int SCB_CONLEN;
+	private int SCB_PMODE;
+	private int SCB_CMODE;
+	private int SCB_OUTDLM;
+	private int SCB_SCBADD; // base address of SCB
+	private int SCB_DMAAD;
+	private int SCB_DRV;
+	private int SCB_USER;
+	private int SCB_MULTCNT;
+	private int SCB_ERRMD;
+	private int SCB_DSO;
+	private int SCB_TMP;
+	private int SCB_DATE; // date,hours,min,sec
+
+	// for dummy BIOS disk access
+	private int track;
+	private int sector;
 
 	private static VirtualCpm vcpm;
 	private static String coredump = null;
@@ -166,6 +173,14 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 		s = System.getenv("VCPMTrace");
 		if (s != null) {
 			props.setProperty("vcpm_trace", s);
+		}
+		s = System.getenv("VCPMMemTop");
+		if (s != null) {
+			props.setProperty("vcpm_memtop", s);
+		}
+		s = System.getenv("VCPMISIS");
+		if (s != null) {
+			props.setProperty("vcpm_isis", "true");
 		}
 		s = System.getenv("VCPMCPU");
 		if (s != null) {
@@ -220,6 +235,14 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 				trc = new Z80Tracer(props, "vcpm", cpu, this, t);
 			}
 		}
+		s = props.getProperty("vcpm_memtop");
+		if (s != null) {
+			int n = Integer.valueOf(s);
+			if (n > 0 && n <= 64) {
+				cpmtop = n * 1024;
+			}
+		}
+		isis = (props.getProperty("vcpm_isis") != null);
 		s = props.getProperty("vcpm_dump");
 		if (s != null) {
 			if (s.length() > 0) {
@@ -246,6 +269,34 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 		lin = new BufferedReader(new InputStreamReader(System.in));
 		CpnetServer srv = new CpnetServer(props, "vcpm", 'P', (byte)0x00, 1, null);
 		hfb = new HostFileBdos(props, "vcpm", new Vector<String>(), 0xfe, srv);
+
+		// Setup all high-memory addresses based on 'cpmtop'
+		biose = cpmtop - 256;
+		nbios = 33;
+		wboot = biose + 3;
+		memtop = biose - 512;	// need space for ALV
+		bdose = memtop + 6;
+		dpbuf = bdose + 3;
+		alvbf = dpbuf + 17;
+		scb = biose + (nbios * 3);	// requires 100 bytes
+		// SCB addresses used internally
+		SCB_VER = scb + 0x05;
+		SCB_PGMRET = scb + 0x10;
+		SCB_CONWID = scb + 0x1a;
+		SCB_CONLEN = scb + 0x1c;
+		SCB_PMODE = scb + 0x2c;
+		SCB_CMODE = scb + 0x33;
+		SCB_OUTDLM = scb + 0x37;
+		SCB_SCBADD = scb + 0x3a; // base address of SCB
+		SCB_DMAAD = scb + 0x3c;
+		SCB_DRV = scb + 0x3e;
+		SCB_USER = scb + 0x44;
+		SCB_MULTCNT = scb + 0x4a;
+		SCB_ERRMD = scb + 0x4b;
+		SCB_DSO = scb + 0x4c;
+		SCB_TMP = scb + 0x50;
+		SCB_DATE = scb + 0x58; // date,hours,min,sec
+
 		mem[alvbf] = (byte)0b10000000; // COMPAT_PRO - don't lock files
 		hfb.bdosCall(70, mem, alvbf, 1, fcb1, defdma);
 		cmds.add(argv);
@@ -966,6 +1017,10 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 
 	private void biosTrap(int pc) {
 		int v = (pc & 0xff) / 3;
+		if (isis && v == 0 && getWORD(pc + 1) != pc) {
+			cpu.setRegPC(getWORD(pc + 1));
+			return;
+		}
 		doBIOS(v);
 	}
 
@@ -1061,6 +1116,7 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 			if (a == 0) { // get time
 				hfb.bdosCall(105, mem, SCB_DATE, 1, fcb1, defdma);
 			}
+			doRET();
 			break;
 		case 5:	// list
 			// TODO: implement bdosCall
@@ -1069,6 +1125,7 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 					lstOut.write(cpu.getRegC());
 				} catch (Exception ee) {}
 			}
+			doRET();
 			break;
 		case 6:	// auxout
 			if (punOut != null) {
@@ -1076,18 +1133,41 @@ public class VirtualCpm implements Computer, Memory, Runnable {
 					punOut.write(cpu.getRegC());
 				} catch (Exception ee) {}
 			}
+			doRET();
+			break;
+		case 12: // setdma
+			setWORD(SCB_DMAAD, cpu.getRegBC());
+			doRET();
+			break;
+		case 9:	// seldsk
+			setDrv(cpu.getRegC());
+			cpu.setRegHL(0); // TODO: simulate DPH (w/DPB)
+			doRET();
+			break;
+		case 8:	// home
+			track = 0;
+			doRET();
+			break;
+		case 10: // settrk
+			track = cpu.getRegBC();
+			doRET();
+			break;
+		case 11: // setsec
+			sector = cpu.getRegBC();
+			doRET();
+			break;
+		case 16: // sectrn
+			cpu.setRegHL(cpu.getRegBC());
+			doRET();
+			break;
+		case 13: // read
+		case 14: // write
+System.err.format("BIOS %d %d: trk=%d sec=%d\n", v, mem[SCB_DRV] & 0xff, track, sector);
+			doRET();
 			break;
 		case 7:	// auxin
 		// TODO: simulate disk I/O on boot tracks...
-		case 8:	// home
-		case 9:	// seldsk
-		case 10: // settrk
-		case 11: // setsec
-		case 12: // setdma
-		case 13: // read
-		case 14: // write
 		case 15: // listst
-		case 16: // sectrn
 		case 18: // auxist
 		case 19: // auxost
 		case 20: // devtbl
@@ -1522,7 +1602,7 @@ System.err.format("Unsupported BDOS function %d\n", fnc);
 			doCCP(cmd); // parse command... setup execution...
 			while (running) {
 				int PC = cpu.getRegPC();
-				if (PC >= memtop) {
+				if (PC >= memtop && PC < cpmtop) {
 					osTrap(PC);
 					if (!running) {
 						break;
